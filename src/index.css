@@ -72,6 +72,21 @@
   --font-family: 'Inter', sans-serif;
 }
 
+[data-theme="night"] {
+  --bg-color: #0a0a0c;
+  --text-primary: #9ca3af;
+  --text-secondary: #6b7280;
+  --card-bg: #111113;
+  --card-border: #27272a;
+  --accent-primary: #818cf8;
+  --accent-secondary: #34d399;
+  --btn-primary-bg: #312e81;
+  --btn-primary-text: #c7d2fe;
+  --input-bg: #0a0a0c;
+  --nav-bg: rgba(10, 10, 12, 0.85);
+  --font-family: 'Inter', sans-serif;
+}
+
 body {
   font-family: var(--font-family);
   background-color: var(--bg-color);

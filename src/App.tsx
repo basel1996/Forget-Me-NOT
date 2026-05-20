@@ -2,11 +2,15 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { AuthProvider, useAuth } from "./components/AuthProvider";
 import { auth, googleProvider, signInWithPopup } from "./lib/firebase";
 import { dbService } from "./lib/dbService";
-import { LogIn, User as UserIcon, Plus, Check, X, Sparkles, LogOut, Settings as SettingsIcon, ArrowLeft, Home, User as UserTab, ArrowDown, ArrowUp, Repeat, RotateCcw, Archive, Trash2, Inbox, Play, Trophy, Activity, AlertTriangle, CornerUpLeft, Coffee, Wind, Leaf, Moon } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { LogIn, User as UserIcon, Plus, Check, X, Sparkles, LogOut, Settings as SettingsIcon, ArrowLeft, Home, User as UserTab, ArrowDown, ArrowUp, Repeat, RotateCcw, Archive, Trash2, Inbox, Play, Trophy, Activity, AlertTriangle, CornerUpLeft, Coffee, Wind, Leaf, Moon, Cloud, Feather, Sun, Mountain, Compass, Waves } from "lucide-react";
+import { motion, AnimatePresence, useMotionValue, useTransform } from "motion/react";
 import { HistoryView } from "./HistoryView";
-import { FocusModeOverlay } from "./components/FocusModeOverlay";
+import { FocusIsland } from "./components/FocusIsland";
 import { WeeklyWinsDashboard } from "./components/WeeklyWinsDashboard";
+import { BottomSheet } from "./components/BottomSheet";
+import { useCircadian } from "./hooks/useCircadian";
+import { useNetworkStatus } from "./hooks/useNetworkStatus";
+import { SyncIndicator } from "./components/SyncIndicator";
 
 interface Task {
   id: string;
@@ -73,6 +77,7 @@ const Login = () => {
 
 const TaskDetails = ({ task, isCompleting, onUpdateSubtask, onStartFocus }: { task: Partial<Task>, isCompleting: boolean, onUpdateSubtask?: (subtasks: any[]) => void, onStartFocus?: (taskId: string, subtaskId: string, text: string) => void }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isSubtasksExpanded, setIsSubtasksExpanded] = useState(false);
   const [backupSubtasks, setBackupSubtasks] = useState<any[] | null>(null);
   const [isDecomposing, setIsDecomposing] = useState(false);
   
@@ -81,7 +86,20 @@ const TaskDetails = ({ task, isCompleting, onUpdateSubtask, onStartFocus }: { ta
   
   const isLongDescription = hasDescription && (task.description!.length > 80 || task.description!.includes('\n'));
   const canDecompose = !!onUpdateSubtask;
-  const requiresExpansion = isLongDescription || hasSubtasks || canDecompose;
+  const requiresExpansion = isLongDescription || canDecompose;
+
+  const completedCount = task.subtasks ? task.subtasks.filter(st => st.isCompleted).length : 0;
+  const nextAction = task.subtasks ? task.subtasks.find(st => !st.isCompleted) : undefined;
+  const subtasksProgress = task.subtasks && task.subtasks.length > 0 ? (completedCount / task.subtasks.length) * 100 : 0;
+
+  useEffect(() => {
+    if (isSubtasksExpanded && nextAction === undefined && hasSubtasks) {
+      const timer = setTimeout(() => {
+        setIsSubtasksExpanded(false);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isSubtasksExpanded, nextAction, hasSubtasks]);
 
   if (!hasDescription && !hasSubtasks && !canDecompose) return null;
 
@@ -108,7 +126,7 @@ const TaskDetails = ({ task, isCompleting, onUpdateSubtask, onStartFocus }: { ta
       }));
       
       onUpdateSubtask(newSubtasks);
-      setIsExpanded(true);
+      setIsSubtasksExpanded(true);
     } catch (error) {
       console.error("Decomposition error:", error);
     } finally {
@@ -155,43 +173,6 @@ const TaskDetails = ({ task, isCompleting, onUpdateSubtask, onStartFocus }: { ta
         </div>
       )}
 
-      {hasSubtasks && isExpanded && (
-        <div className={`mt-3 space-y-2 mb-2 transition-opacity duration-300 ${isCompleting ? 'opacity-40' : 'opacity-100'}`}>
-          {task.subtasks!.map((subtask, idx) => (
-            <div key={subtask.id || idx} className="flex items-start gap-2 group">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onUpdateSubtask) {
-                    onUpdateSubtask(task.subtasks!.map((s, sIdx) => (s.id || sIdx) === (subtask.id || idx) ? { ...s, isCompleted: !s.isCompleted } : s));
-                  }
-                }}
-                className={`mt-0.5 w-4 h-4 shrink-0 rounded-sm border flex items-center justify-center transition-colors ${subtask.isCompleted ? 'bg-primary border-primary text-background' : 'border-outline hover:border-muted text-transparent'}`}
-                disabled={!onUpdateSubtask}
-              >
-                <Check size={12} />
-              </button>
-              <span className={`text-sm ${subtask.isCompleted ? 'line-through text-muted' : 'text-content'}`}>{subtask.text}</span>
-              
-              {!subtask.isCompleted && onStartFocus && task.id && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStartFocus(task.id!, subtask.id || idx.toString(), subtask.text);
-                  }}
-                  className="ml-auto text-muted hover:text-primary transition-colors focus:outline-none"
-                  title="Focus mode (Pomodoro)"
-                >
-                  <Play size={14} fill="currentColor" />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
       {requiresExpansion && (
         <button
           type="button"
@@ -199,11 +180,126 @@ const TaskDetails = ({ task, isCompleting, onUpdateSubtask, onStartFocus }: { ta
             e.stopPropagation();
             setIsExpanded(!isExpanded);
           }}
-          className="text-[11px] text-muted hover:text-content mt-1 font-medium transition-colors focus:outline-none flex items-center gap-0.5"
+          className="text-[11px] text-muted hover:text-content mt-1 mb-2 font-medium transition-colors focus:outline-none flex items-center gap-0.5"
         >
-          {isExpanded ? <><ArrowUp size={12}/> Show less</> : <><ArrowDown size={12}/> {hasSubtasks && !hasDescription ? 'View sub-tasks' : hasSubtasks ? 'Show more & sub-tasks' : 'Show more'}</>}
+          {isExpanded ? <><ArrowUp size={12}/> Show less</> : <><ArrowDown size={12}/> Show more</>}
         </button>
       )}
+
+      {hasSubtasks && (
+        <div className="mt-3 bg-[var(--nav-bg)] rounded-xl border border-outline overflow-hidden shadow-sm">
+          {/* Progress Bar */}
+          <div className="h-1 bg-outline/30 w-full">
+            <motion.div 
+              className="h-full bg-primary" 
+              initial={{ width: 0 }}
+              animate={{ width: `${subtasksProgress}%` }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+            />
+          </div>
+          
+          <div className="p-3">
+            {!isSubtasksExpanded && nextAction && (
+              <div className="flex items-start gap-2 group mb-3">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onUpdateSubtask) {
+                      onUpdateSubtask(task.subtasks!.map((s, sIdx) => (s.id || sIdx) === (nextAction.id || task.subtasks!.indexOf(nextAction)) ? { ...s, isCompleted: true } : s));
+                    }
+                  }}
+                  className="mt-0.5 w-4 h-4 shrink-0 rounded-sm border border-outline hover:border-primary text-transparent flex items-center justify-center transition-colors"
+                  disabled={!onUpdateSubtask}
+                >
+                  <Check size={12} />
+                </button>
+                <span className="text-sm text-content flex-1 font-medium">{nextAction.text}</span>
+                {onStartFocus && task.id && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStartFocus(task.id!, nextAction.id || task.subtasks!.indexOf(nextAction).toString(), nextAction.text);
+                    }}
+                    className="ml-auto text-muted hover:text-primary transition-colors focus:outline-none"
+                    title="Focus mode (Pomodoro)"
+                  >
+                    <Play size={14} fill="currentColor" />
+                  </button>
+                )}
+              </div>
+            )}
+            {!isSubtasksExpanded && !nextAction && (
+              <p className="text-sm text-muted italic mb-3">All sub-tasks completed! 🎉</p>
+            )}
+
+            <AnimatePresence initial={false}>
+              {isSubtasksExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className={`space-y-2.5 mb-4 transition-opacity duration-300 ${isCompleting ? 'opacity-40' : 'opacity-100'}`}>
+                    {task.subtasks!.map((subtask, idx) => (
+                      <div key={subtask.id || idx} className="flex items-start gap-2 group">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onUpdateSubtask) {
+                              onUpdateSubtask(task.subtasks!.map((s, sIdx) => (s.id || sIdx) === (subtask.id || idx) ? { ...s, isCompleted: !s.isCompleted } : s));
+                            }
+                          }}
+                          className={`mt-0.5 w-4 h-4 shrink-0 rounded-sm border flex items-center justify-center transition-colors ${subtask.isCompleted ? 'bg-primary border-primary text-background' : 'border-outline hover:border-primary text-transparent'}`}
+                          disabled={!onUpdateSubtask}
+                        >
+                          <Check size={12} />
+                        </button>
+                        <span className={`text-sm flex-1 ${subtask.isCompleted ? 'line-through text-muted' : 'text-content'}`}>{subtask.text}</span>
+                        
+                        {!subtask.isCompleted && onStartFocus && task.id && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onStartFocus(task.id!, subtask.id || idx.toString(), subtask.text);
+                            }}
+                            className="ml-auto text-muted hover:text-primary transition-colors focus:outline-none"
+                            title="Focus mode (Pomodoro)"
+                          >
+                            <Play size={14} fill="currentColor" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="flex justify-center border-t border-outline/30 pt-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsSubtasksExpanded(!isSubtasksExpanded);
+                }}
+                className="text-[11px] text-muted hover:text-content font-medium transition-colors focus:outline-none flex items-center gap-1 uppercase tracking-wider"
+              >
+                {isSubtasksExpanded ? (
+                  <>Collapse <ArrowUp size={12}/></>
+                ) : (
+                  <>See all {task.subtasks!.length} steps <ArrowDown size={12}/></>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isCompleting && (
         <motion.div className="absolute left-0 top-1/2 h-[1px] bg-muted/50 w-full -translate-y-1/2 rounded-full" initial={{ scaleX: 0, originX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.3, ease: "easeOut", delay: 0.1 }} />
       )}
@@ -240,16 +336,102 @@ const calculateConsistency = (completionHistory?: string[]) => {
   return Math.round((recentCompletions.length / 30) * 100);
 };
 
+const CircularProgressIcon = ({ 
+  icon: Icon, 
+  percentage, 
+  isActive, 
+  hasIndicator 
+}: { 
+  icon: any, 
+  percentage?: number, 
+  isActive: boolean, 
+  hasIndicator?: boolean 
+}) => {
+  const radius = 22;
+  const circumference = 2 * Math.PI * radius;
+  const safePercentage = isNaN(percentage as number) ? 0 : Math.max(0, Math.min(100, percentage || 0));
+  const strokeDashoffset = circumference - (safePercentage / 100) * circumference;
+
+  return (
+    <div className="relative flex items-center justify-center w-[48px] h-[48px] mb-1">
+      {percentage !== undefined && percentage > 0 && (
+        <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none" viewBox="0 0 48 48">
+          {/* Background track */}
+          <circle
+            cx="24"
+            cy="24"
+            r={radius}
+            className="stroke-outline/30"
+            strokeWidth={2}
+            fill="transparent"
+          />
+          {/* Progress fill */}
+          <circle
+            cx="24"
+            cy="24"
+            r={radius}
+            className="stroke-primary"
+            strokeWidth={2}
+            fill="transparent"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
+          />
+        </svg>
+      )}
+      <Icon size={20} className={isActive ? 'stroke-2 text-primary' : 'stroke-[1.5] text-muted'} />
+      {hasIndicator && (
+        <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[var(--nav-bg)] shadow-[0_0_0_1px_rgba(255,0,0,0.2)]" />
+      )}
+    </div>
+  );
+};
+
 const Dashboard = () => {
   const { user } = useAuth();
+  const phase = useCircadian();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [completedTasksCount, setCompletedTasksCount] = useState({ life: 0, household: 0, routines: 0 });
   const [activeTab, setActiveTab] = useState<'inbox' | 'life' | 'household' | 'routines'>('life');
+  
+  // Pull-to-Capture state mapping
+  const [isPullCapturing, setIsPullCapturing] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const pullRef = useRef<HTMLInputElement>(null);
+  const [pullInput, setPullInput] = useState("");
+  const dragY = useMotionValue(0);
+  const [canDrag, setCanDrag] = useState(true);
+  
+  useEffect(() => {
+    const handleScroll = () => {
+      setCanDrag(window.scrollY === 0);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
   const [suggestionCache, setSuggestionCache] = useState<Record<string, Suggestion[]>>({ inbox: [], life: [], household: [], routines: [] });
   const currentSuggestions = suggestionCache[activeTab] || [];
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [isTakingLong, setIsTakingLong] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [activeFocusTask, setActiveFocusTask] = useState<{taskId: string, subtaskId: string, title: string} | null>(null);
+
+  const inboxActiveCount = tasks.filter(t => !t.isRecurring && (t.category === 'inbox' || !t.category)).length;
+  
+  const lifeActiveCount = tasks.filter(t => !t.isRecurring && t.category === 'life').length;
+  const lifeTotal = lifeActiveCount + completedTasksCount.life;
+  const lifePercentage = lifeTotal > 0 ? (completedTasksCount.life / lifeTotal) * 100 : 0;
+  
+  const householdActiveCount = tasks.filter(t => !t.isRecurring && t.category === 'household').length;
+  const householdTotal = householdActiveCount + completedTasksCount.household;
+  const householdPercentage = householdTotal > 0 ? (completedTasksCount.household / householdTotal) * 100 : 0;
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const allRoutines = tasks.filter(t => t.isRecurring);
+  const routinesCompletedTodayNumber = allRoutines.filter(r => r.completionHistory?.includes(todayStr)).length;
+  const routinesTotal = allRoutines.length;
+  const routinesPercentage = routinesTotal > 0 ? (routinesCompletedTodayNumber / routinesTotal) * 100 : 0;
 
   const [showProfile, setShowProfile] = useState(false);
   const [bio, setBio] = useState("");
@@ -305,7 +487,9 @@ const Dashboard = () => {
   const [routineInterval, setRoutineInterval] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
   const [routineCategory, setRoutineCategory] = useState<'life' | 'household'>('life');
   const [routinePriority, setRoutinePriority] = useState<'low' | 'medium' | 'high'>('medium');
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const isOnline = useNetworkStatus();
+  const isOffline = !isOnline;
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline_saved'>('synced');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -316,16 +500,23 @@ const Dashboard = () => {
     if (e) e.stopPropagation();
     const taskToDelete = tasks.find(t => t.id === id);
     setTasks(prev => prev.filter(t => t.id !== id));
-    try {
-      if (!String(id).startsWith('temp-')) {
-        await dbService.deleteTask(id);
+    
+    if (isOffline) {
+      setSyncStatus('offline_saved');
+    } else {
+      setSyncStatus('syncing');
+      try {
+        if (!String(id).startsWith('temp-')) {
+          await dbService.deleteTask(id);
+        }
+        setSyncStatus('synced');
+      } catch (error) {
+        if (taskToDelete) {
+          setTasks(prev => [...prev, taskToDelete]);
+        }
+        setToastError("Failed to delete task.");
+        console.error("Failed to delete task:", error);
       }
-    } catch (error) {
-      if (taskToDelete) {
-        setTasks(prev => [...prev, taskToDelete]);
-      }
-      setToastError("Failed to delete task.");
-      console.error("Failed to delete task:", error);
     }
     setDeleteConfirmId(null);
   };
@@ -341,41 +532,37 @@ const Dashboard = () => {
     if (currentTasks.length === 0) return;
 
     setIsClearing(true);
-    try {
-        // 2. SAFETY CHECK: Only send REAL Firebase IDs to the database
-        const realTaskIds = currentTasks
-            .map(t => t.id)
-            .filter(id => !String(id).startsWith('temp-'));
+    // 4. Instantly wipe ALL of them (both real and temp) from the UI state
+    const previousTasks = [...tasks];
+    setTasks(prev => prev.filter(t => 
+        !(activeTab === 'routines' ? t.isRecurring : (!t.isRecurring && t.category === activeTab))
+    ));
+    
+    if (isOffline) {
+        setSyncStatus('offline_saved');
+    } else {
+        setSyncStatus('syncing');
+        try {
+            // 2. SAFETY CHECK: Only send REAL Firebase IDs to the database
+            const realTaskIds = currentTasks
+                .map(t => t.id)
+                .filter(id => !String(id).startsWith('temp-'));
 
-        // 3. Only fire the database call if there are actual database documents to delete
-        if (realTaskIds.length > 0) {
-            await dbService.clearTasks(realTaskIds);
+            // 3. Only fire the database call if there are actual database documents to delete
+            if (realTaskIds.length > 0) {
+                await dbService.clearTasks(realTaskIds);
+            }
+            setSyncStatus('synced');
+        } catch (error) {
+            setTasks(previousTasks); // Rollback
+            setToastError("Failed to clear tasks.");
+            console.error("Failed to clear tasks:", error);
         }
-
-        // 4. Instantly wipe ALL of them (both real and temp) from the UI state
-        setTasks(prev => prev.filter(t => 
-            !(activeTab === 'routines' ? t.isRecurring : (!t.isRecurring && t.category === activeTab))
-        ));
-        
-    } catch (error) {
-        setToastError("Failed to clear tasks.");
-        console.error("Failed to clear tasks:", error);
-    } finally {
-        setIsClearing(false);
-        setClearAllConfirm(false);
     }
-};
-
-  useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+    
+    setIsClearing(false);
+    setClearAllConfirm(false);
+  };
 
   const openEditModal = (task: Task) => {
     setEditingTask(task);
@@ -528,9 +715,23 @@ const Dashboard = () => {
     }
   };
 
+  const fetchCompletedTasksCount = async () => {
+    if (!user) return;
+    try {
+      const counts = await dbService.getCompletedTasksToday(user.uid);
+      setCompletedTasksCount(counts);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", activeTab);
-  }, [activeTab]);
+    if (phase === 'night') {
+      document.documentElement.setAttribute("data-theme", "night");
+    } else {
+      document.documentElement.setAttribute("data-theme", activeTab);
+    }
+  }, [activeTab, phase]);
 
   useEffect(() => {
     if (!user) return;
@@ -546,6 +747,7 @@ const Dashboard = () => {
     
     fetchProfile();
     fetchTasks();
+    fetchCompletedTasksCount();
   }, [user]);
 
   useEffect(() => {
@@ -591,10 +793,16 @@ const Dashboard = () => {
     setShowQuickCapture(false);
     setIsSubmitting(false);
 
-    try {
-      await dbService.saveTask(firestoreId, newTaskData);
-    } catch (error) {
-      console.error("Failed to background sync quick capture task", error);
+    if (isOffline) {
+      setSyncStatus('offline_saved');
+    } else {
+      setSyncStatus('syncing');
+      try {
+        await dbService.saveTask(firestoreId, newTaskData);
+        setSyncStatus('synced');
+      } catch (error) {
+        console.error("Failed to background sync quick capture task", error);
+      }
     }
   };
 
@@ -639,10 +847,16 @@ const Dashboard = () => {
     setShowTaskModal(false);
     setIsSubmitting(false);
 
-    try {
-      await dbService.saveTask(firestoreId, newTaskData);
-    } catch (error) {
-      console.error("Failed to background sync added task", error);
+    if (isOffline) {
+      setSyncStatus('offline_saved');
+    } else {
+      setSyncStatus('syncing');
+      try {
+        await dbService.saveTask(firestoreId, newTaskData);
+        setSyncStatus('synced');
+      } catch (error) {
+        console.error("Failed to background sync added task", error);
+      }
     }
   };
 
@@ -677,15 +891,23 @@ const Dashboard = () => {
     }
     
     setTimeout(async () => {
-      try {
-        await dbService.completeTask(id);
-        fetchTasks();
-      } catch (error) {
-        if (isOffline) setToastError("Saved locally. Syncing when online.");
-        else setToastError("Failed to complete task.");
-        console.error("Failed to complete task", error);
-      } finally {
+      // Fully optimistic removal from local state
+      setTasks(prev => prev.filter(t => t.id !== id));
+      
+      if (isOffline) {
+        setSyncStatus('offline_saved');
         setCompletingIds(prev => prev.filter(compId => compId !== id));
+      } else {
+        setSyncStatus('syncing');
+        try {
+          await dbService.completeTask(id);
+          setSyncStatus('synced');
+          fetchCompletedTasksCount();
+        } catch (error) {
+          console.error("Failed to complete task", error);
+        } finally {
+          setCompletingIds(prev => prev.filter(compId => compId !== id));
+        }
       }
     }, 500); // Wait for the visual strike-through animation
   };
@@ -694,6 +916,7 @@ const Dashboard = () => {
     try {
       await dbService.undoTask(id);
       fetchTasks();
+      fetchCompletedTasksCount();
     } catch (error) {
       if (isOffline) setToastError("Saved locally. Syncing when online.");
       else setToastError("Failed to undo task.");
@@ -761,7 +984,7 @@ const Dashboard = () => {
     
     setSuggestionCache(prev => ({ ...prev, [activeTab]: [] })); // Clear previous
     
-    const timeoutId = setTimeout(() => setIsTakingLong(true), 15000);
+    const timeoutId = setTimeout(() => setIsTakingLong(true), 30000);
     
     try {
       const allTasks = await dbService.getTasks(user.uid, 'completed');
@@ -1011,6 +1234,48 @@ const Dashboard = () => {
     }
   };
 
+  const cycleEffort = async (e: React.MouseEvent, taskId: string, currentEffort: string = 'medium') => {
+    e.stopPropagation();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(20);
+    
+    const map: Record<string, 'low'|'medium'|'high'> = {
+      'low': 'medium',
+      'medium': 'high',
+      'high': 'low'
+    };
+    const nextValue = map[currentEffort] || 'medium';
+    
+    // Optimistic UI update
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, effortLevel: nextValue } : t));
+    
+    try {
+      await dbService.updateTask(taskId, { effortLevel: nextValue });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const cyclePriority = async (e: React.MouseEvent, taskId: string, currentPriority: string = 'medium') => {
+    e.stopPropagation();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(20);
+    
+    const map: Record<string, 'low'|'medium'|'high'> = {
+      'low': 'medium',
+      'medium': 'high',
+      'high': 'low'
+    };
+    const nextValue = map[currentPriority] || 'medium';
+    
+    // Optimistic UI update
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, priority: nextValue } : t));
+    
+    try {
+      await dbService.updateTask(taskId, { priority: nextValue });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const renderTask = (task: Task) => {
     const isCompleting = completingIds.includes(task.id);
     const isPaused = task.isPaused;
@@ -1074,25 +1339,34 @@ const Dashboard = () => {
               {(() => {
                 const e = task.effortLevel || 'medium';
                 let content = '';
-                if (e === 'low') content = '⚡';
-                else if (e === 'medium') content = '⚡⚡';
-                else content = '⚡⚡⚡';
+                let bgStyle = '';
+                if (e === 'low') { content = '⚡'; bgStyle = 'bg-green-900/40 text-green-400'; }
+                else if (e === 'medium') { content = '⚡⚡'; bgStyle = 'bg-yellow-900/40 text-yellow-400'; }
+                else { content = '⚡⚡⚡'; bgStyle = 'bg-red-900/40 text-red-500'; }
                 return (
-                 <span className="text-yellow-500 shrink-0 text-xs pl-1">
+                 <motion.button 
+                   whileTap={{ scale: 0.9 }}
+                   onClick={(ev) => cycleEffort(ev, task.id, e)}
+                   className={`shrink-0 text-xs px-2 py-0.5 rounded-full transition-colors ${bgStyle}`}
+                 >
                    {content}
-                 </span>
+                 </motion.button>
                 );
               })()}
               {(() => {
                 const p = task.priority || 'medium';
                 let colors = '';
-                if (p === 'high') colors = 'bg-red-900/40 text-red-400';
-                else if (p === 'medium') colors = 'bg-amber-900/40 text-amber-400';
-                else colors = 'bg-gray-800 text-gray-400';
+                if (p === 'low') colors = 'bg-green-900/40 text-green-400';
+                else if (p === 'medium') colors = 'bg-yellow-900/40 text-yellow-400';
+                else colors = 'bg-red-900/40 text-red-500';
                 return (
-                  <span className={`text-[10px] tracking-wider uppercase font-semibold px-2 py-0.5 rounded-full ${colors}`}>
+                  <motion.button 
+                    whileTap={{ scale: 0.9 }}
+                    onClick={(ev) => cyclePriority(ev, task.id, p)}
+                    className={`text-[10px] tracking-wider uppercase font-semibold px-2 py-0.5 rounded-full transition-colors ${colors}`}
+                  >
                     {p}
-                  </span>
+                  </motion.button>
                 );
               })()}
               {task.isRecurring && (task.currentStreak || task.streakCount) ? (
@@ -1227,37 +1501,86 @@ const Dashboard = () => {
     );
   };
 
+const handlePullSubmit = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && pullInput.trim()) {
+      e.preventDefault();
+      setIsSubmitting(true);
+      
+      const firestoreId = dbService.getNewTaskId();
+      const selectedCategory = activeTab === 'routines' ? 'household' : activeTab as 'life' | 'household' | 'inbox';
+      const newTaskData: Omit<Task, 'id' | 'createdAt'> = {
+          userId: user!.uid,
+          title: pullInput.trim(),
+          description: "",
+          status: 'active',
+          category: selectedCategory,
+          isRecurring: false,
+          subtasks: [],
+          priority: 'medium',
+          effortLevel: 'medium'
+      };
+
+      setTasks(prev => [{ id: firestoreId, ...newTaskData, createdAt: new Date().toISOString() } as Task, ...prev]);
+      setPullInput("");
+      setIsPullCapturing(false);
+      setIsSubmitting(false);
+
+      if (isOffline) {
+        setSyncStatus('offline_saved');
+      } else {
+        setSyncStatus('syncing');
+        try {
+          await dbService.saveTask(firestoreId, newTaskData);
+          setSyncStatus('synced');
+        } catch (error) {
+          console.error("Failed to background sync pull task", error);
+        }
+      }
+    }
+  };
+
   const EmptyState = () => {
     if (isSorting) return null;
 
-    let Icon = Coffee;
-    let title = "All Clear.";
-    let message = "You are completely caught up in this list. Take a moment to breathe or enjoy your free time.";
+    // Use useMemo to keep the same random visual for the duration of the component's lifecycle per tab
+    const visual = useMemo(() => {
+      const inboxVisuals = [
+         { icon: Wind, title: "A Breath of Fresh Air.", message: "Inbox zero achieved. Your mind can rest easy for now." },
+         { icon: Cloud, title: "Clear Skies.", message: "Nothing left unsorted. Take a deep breath." },
+         { icon: Feather, title: "Light as a Feather.", message: "Your thoughts are all organized. Enjoy the clarity." }
+      ];
+      const lifeVisuals = [
+         { icon: Leaf, title: "Quiet Moments.", message: "Your life focuses are handled. Enjoy the stillness of the present." },
+         { icon: Sun, title: "Radiant Peace.", message: "You have nurtured your goals today. Bask in the warmth of progress." },
+         { icon: Mountain, title: "Peak Reached.", message: "You've conquered today's personal challenges. Rest and recover." }
+      ];
+      const householdVisuals = [
+         { icon: Coffee, title: "Chores Complete.", message: "The house is in order. Time to sit back, relax, and enjoy your space." },
+         { icon: Home, title: "Sanctuary Restored.", message: "Everything is precisely where it should be. Enjoy your haven." },
+         { icon: Sparkles, title: "Spotless and Serene.", message: "Your environment is calm and clean. You've earned a break." }
+      ];
+      const routinesVisuals = [
+         { icon: Moon, title: "Habits Checked.", message: "You've successfully completed your routines. The rest of the day is yours." },
+         { icon: Compass, title: "True North.", message: "You've stayed perfectly on course today. Beautiful consistency." },
+         { icon: Waves, title: "Smooth Sailing.", message: "Your habits are flowing effortlessly. Ride the gentle wave." }
+      ];
 
-    if (activeTab === 'inbox') {
-      Icon = Wind;
-      title = "A Breath of Fresh Air.";
-      message = "Inbox zero achieved. Your mind can rest easy for now.";
-    } else if (activeTab === 'life') {
-      Icon = Leaf;
-      title = "Quiet Moments.";
-      message = "Your life focuses are handled. Enjoy the stillness of the present.";
-    } else if (activeTab === 'household') {
-      Icon = Coffee;
-      title = "Chores Complete.";
-      message = "The house is in order. Time to sit back, relax, and enjoy your space.";
-    } else if (activeTab === 'routines') {
-      Icon = Moon;
-      title = "Habits Checked.";
-      message = "You've successfully completed your routines. The rest of the day is yours.";
-    }
+      let list = inboxVisuals;
+      if (activeTab === 'life') list = lifeVisuals;
+      else if (activeTab === 'household') list = householdVisuals;
+      else if (activeTab === 'routines') list = routinesVisuals;
+
+      return list[Math.floor(Math.random() * list.length)];
+    }, [activeTab]);
+
+    const Icon = visual.icon;
 
     return (
       <div className="flex flex-col items-center justify-center min-h-[40vh] py-12 text-center">
         <Icon size={48} strokeWidth={1} className="text-gray-500/50 mb-4" />
-        <h3 className="text-xl font-medium mb-1 text-content">{title}</h3>
+        <h3 className="text-xl font-medium mb-1 text-content">{visual.title}</h3>
         <p className="text-sm max-w-xs leading-relaxed text-muted">
-          {message}
+          {visual.message}
         </p>
       </div>
     );
@@ -1296,13 +1619,16 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="distraction-free relative min-h-screen">
+    <div className={`distraction-free relative min-h-screen transition-colors duration-1000 ${phase === 'night' ? 'night-theme-override' : ''}`}>
+      <SyncIndicator status={syncStatus} />
       <header className="flex justify-between items-center mb-6 pt-4">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-light tracking-tight">Forget-Me-Not</h1>
-          <div className={`text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full border transition-all duration-500 ${isOffline ? 'bg-orange-500/10 text-orange-500 border-orange-500/20' : 'bg-green-500/10 text-green-500 border-green-500/20 opacity-40 hover:opacity-100'}`}>
-            {isOffline ? 'Offline' : 'Syncing'}
-          </div>
+          <h1 className="text-2xl font-light tracking-tight transition-colors duration-1000">
+            {phase === 'morning' && "Let's focus."}
+            {phase === 'afternoon' && "Keep the momentum."}
+            {phase === 'evening' && "Wrapping up the day."}
+            {phase === 'night' && "Time to wind down."}
+          </h1>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowHistory(true)} className="p-2 text-muted hover:text-content transition-colors rounded-full hover:bg-outline/30" title="History">
@@ -1387,7 +1713,43 @@ const Dashboard = () => {
             </button>
           </div>
         </div>
-        {renderTaskList()}
+        <div className="relative">
+          {isPullCapturing && (
+            <div className="w-full mb-4 z-10 relative">
+              <div className="flex items-center gap-2 bg-surface border border-primary/50 shadow-md rounded-[20px] p-2 pr-4">
+                <input 
+                  ref={pullRef}
+                  type="text" 
+                  value={pullInput}
+                  onChange={(e) => setPullInput(e.target.value)}
+                  onKeyDown={handlePullSubmit}
+                  placeholder={`Quick add to ${activeTab === 'life' ? 'Life Focus' : activeTab === 'inbox' ? 'Unsorted' : 'Household'}...`}
+                  className="flex-1 bg-transparent border-none outline-none text-content text-sm ml-2"
+                  autoFocus 
+                  disabled={isSubmitting}
+                />
+                <button onClick={() => setIsPullCapturing(false)} className="text-xs text-muted hover:text-red-500 font-medium">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          <motion.div
+            ref={listRef}
+            style={{ y: dragY }}
+            drag={canDrag && activeTab !== 'routines' ? "y" : false}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={0.2}
+            onDragEnd={(_, info) => {
+              if (info.offset.y > 120 && activeTab !== 'routines') {
+                if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([50, 50]);
+                setIsPullCapturing(true);
+              }
+            }}
+            className="relative z-10 bg-[var(--bg-color)] min-h-[50vh]"
+          >
+            {renderTaskList()}
+          </motion.div>
+        </div>
       </section>
 
       <section className="pb-10">
@@ -1561,586 +1923,533 @@ const Dashboard = () => {
       </section>
 
       {/* Routine Modal */}
-      <AnimatePresence>
-        {showRoutineModal && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface border border-outline p-6 rounded-[24px] max-w-sm w-full shadow-2xl relative max-h-[90vh] overflow-y-auto"
-            >
-              <button 
-                onClick={() => setShowRoutineModal(false)}
-                className="absolute top-4 right-4 p-2 text-muted hover:text-content bg-outline/20 rounded-full transition-colors"
-              >
-                <X size={16} />
-              </button>
-              <h2 className="text-xl font-light mb-6">New Routine</h2>
-              
-              <form onSubmit={addRoutine} className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
-                  <input
-                    type="text"
-                    required
-                    value={routineTitle}
-                    onChange={(e) => setRoutineTitle(e.target.value)}
-                    placeholder="e.g. Water plants"
-                    className="input-minimal w-full"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
-                  <textarea
-                    value={routineDescription}
-                    onChange={(e) => setRoutineDescription(e.target.value)}
-                    placeholder="Add details..."
-                    className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
-                  />
-                </div>
-                
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks (Checklist)</label>
-                  {newSubtasks.length > 0 && (
-                    <div className="mb-2 space-y-1">
-                      {newSubtasks.map((st) => (
-                        <div key={st.id} className="flex justify-between items-center bg-[var(--card-bg)] px-3 py-2 rounded-xl border border-outline text-sm">
-                          <span className="truncate">{st.text}</span>
-                          {subtaskDeleteConfirmId === st.id ? (
-                            <div className="flex items-center gap-1 border border-red-500/20 bg-red-500/10 rounded-full px-1 py-1 shrink-0 ml-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setNewSubtasks(prev => prev.filter(s => s.id !== st.id));
-                                  setSubtaskDeleteConfirmId(null);
-                                }}
-                                className="p-1 text-red-500 hover:bg-red-500/20 rounded-full transition-colors"
-                              >
-                                <Check size={12} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setSubtaskDeleteConfirmId(null)}
-                                className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"
-                              >
-                                <X size={12} />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setSubtaskDeleteConfirmId(st.id)}
-                              className="text-muted hover:text-red-500 transition-colors ml-2 shrink-0 bg-outline/20 p-1 rounded-full"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newSubtaskInput}
-                      onChange={(e) => setNewSubtaskInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (newSubtaskInput.trim()) {
-                            setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
-                            setNewSubtaskInput("");
-                          }
-                        }
-                      }}
-                      placeholder="Add a sub-task..."
-                      className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (newSubtaskInput.trim()) {
-                          setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
-                          setNewSubtaskInput("");
-                        }
-                      }}
-                      className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
-                    >
-                      Add
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Interval</label>
-                    <select
-                      value={routineInterval}
-                      onChange={(e) => setRoutineInterval(e.target.value as any)}
-                      className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
-                    >
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="yearly">Yearly</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Category</label>
-                    <select
-                      value={routineCategory}
-                      onChange={(e) => setRoutineCategory(e.target.value as any)}
-                      className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
-                    >
-                      <option value="life">Life Focus</option>
-                      <option value="household">Household</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Tag (Optional)</label>
-                  <input
-                    type="text"
-                    value={routineTag}
-                    onChange={(e) => setRoutineTag(e.target.value)}
-                    placeholder="e.g. garden"
-                    className="input-minimal w-full"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
-                  <select
-                    value={routinePriority}
-                    onChange={(e) => setRoutinePriority(e.target.value as any)}
-                    className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </div>
-
-                <div className="pt-2">
-                  <button 
-                    type="submit" 
-                    disabled={isSubmitting}
-                    className={`w-full btn-primary py-3 rounded-full shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-                  >
-                    {isSubmitting ? 'Saving...' : 'Save Routine'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+      <BottomSheet isOpen={showRoutineModal} onClose={() => setShowRoutineModal(false)}>
+        <h2 className="text-xl font-light mb-6">New Routine</h2>
+        
+        <form onSubmit={addRoutine} className="space-y-4">
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
+            <input
+              type="text"
+              required
+              value={routineTitle}
+              onChange={(e) => setRoutineTitle(e.target.value)}
+              placeholder="e.g. Water plants"
+              className="input-minimal w-full"
+            />
           </div>
-        )}
-      </AnimatePresence>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
+            <textarea
+              value={routineDescription}
+              onChange={(e) => setRoutineDescription(e.target.value)}
+              placeholder="Add details..."
+              className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
+            />
+          </div>
+          
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks (Checklist)</label>
+            {newSubtasks.length > 0 && (
+              <div className="mb-2 space-y-1">
+                {newSubtasks.map((st) => (
+                  <div key={st.id} className="flex justify-between items-center bg-[var(--card-bg)] px-3 py-2 rounded-xl border border-outline text-sm">
+                    <span className="truncate">{st.text}</span>
+                    {subtaskDeleteConfirmId === st.id ? (
+                      <div className="flex items-center gap-1 border border-red-500/20 bg-red-500/10 rounded-full px-1 py-1 shrink-0 ml-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewSubtasks(prev => prev.filter(s => s.id !== st.id));
+                            setSubtaskDeleteConfirmId(null);
+                          }}
+                          className="p-1 text-red-500 hover:bg-red-500/20 rounded-full transition-colors"
+                        >
+                          <Check size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSubtaskDeleteConfirmId(null)}
+                          className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setSubtaskDeleteConfirmId(st.id)}
+                        className="text-muted hover:text-red-500 transition-colors ml-2 shrink-0 bg-outline/20 p-1 rounded-full"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newSubtaskInput}
+                onChange={(e) => setNewSubtaskInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (newSubtaskInput.trim()) {
+                      setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
+                      setNewSubtaskInput("");
+                    }
+                  }
+                }}
+                placeholder="Add a sub-task..."
+                className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (newSubtaskInput.trim()) {
+                    setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
+                    setNewSubtaskInput("");
+                  }
+                }}
+                className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Interval</label>
+              <select
+                value={routineInterval}
+                onChange={(e) => setRoutineInterval(e.target.value as any)}
+                className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
+              >
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Category</label>
+              <select
+                value={routineCategory}
+                onChange={(e) => setRoutineCategory(e.target.value as any)}
+                className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
+              >
+                <option value="life">Life Focus</option>
+                <option value="household">Household</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Tag (Optional)</label>
+            <input
+              type="text"
+              value={routineTag}
+              onChange={(e) => setRoutineTag(e.target.value)}
+              placeholder="e.g. garden"
+              className="input-minimal w-full"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
+            <select
+              value={routinePriority}
+              onChange={(e) => setRoutinePriority(e.target.value as any)}
+              className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+
+          <div className="pt-8">
+            <button 
+              type="submit" 
+              disabled={isSubmitting}
+              className={`w-full btn-primary py-4 rounded-[16px] shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Routine'}
+            </button>
+          </div>
+        </form>
+      </BottomSheet>
 
 
       {/* Task Modal */}
-      <AnimatePresence>
-        {showTaskModal && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface border border-outline p-6 rounded-[24px] max-w-sm w-full shadow-2xl relative max-h-[90vh] overflow-y-auto"
-            >
-              <button 
-                onClick={() => setShowTaskModal(false)}
-                className="absolute top-4 right-4 p-2 text-muted hover:text-content bg-outline/20 rounded-full transition-colors"
-                type="button"
-              >
-                <X size={16} />
-              </button>
-              <h2 className="text-xl font-light mb-6">New {activeTab === 'life' ? 'Life Focus' : activeTab === 'inbox' ? 'Unsorted' : 'Household'} Task</h2>
-              
-              <form onSubmit={addTask} className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    required
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    placeholder={activeTab === 'life' ? "e.g. Review UpToDate heart failure guidelines" : activeTab === 'inbox' ? "e.g. Brain dump..." : "e.g. Buy millet for Ziko"}
-                    className="input-minimal w-full"
-                  />
-                </div>
-                
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
-                  <textarea
-                    value={newTaskDescription}
-                    onChange={(e) => setNewTaskDescription(e.target.value)}
-                    placeholder="Add details..."
-                    className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
-                  />
-                </div>
+      <BottomSheet isOpen={showTaskModal} onClose={() => setShowTaskModal(false)}>
+        <h2 className="text-xl font-light mb-6">New {activeTab === 'life' ? 'Life Focus' : activeTab === 'inbox' ? 'Unsorted' : 'Household'} Task</h2>
+        
+        <form onSubmit={addTask} className="space-y-4">
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
+            <input
+              ref={inputRef}
+              type="text"
+              required
+              value={newTaskTitle}
+              onChange={(e) => setNewTaskTitle(e.target.value)}
+              placeholder={activeTab === 'life' ? "e.g. Review UpToDate heart failure guidelines" : activeTab === 'inbox' ? "e.g. Brain dump..." : "e.g. Buy millet for Ziko"}
+              className="input-minimal w-full"
+            />
+          </div>
+          
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
+            <textarea
+              value={newTaskDescription}
+              onChange={(e) => setNewTaskDescription(e.target.value)}
+              placeholder="Add details..."
+              className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
+            />
+          </div>
 
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks</label>
-                  <div className="space-y-2 mb-3">
-                    {newSubtasks.map((subtask) => (
-                      <div key={subtask.id} className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setNewSubtasks(prev => prev.map(s => s.id === subtask.id ? { ...s, isCompleted: !s.isCompleted } : s))}
-                          className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${subtask.isCompleted ? 'bg-primary border-primary text-background' : 'border-outline hover:border-muted text-transparent'}`}
-                        >
-                          <Check size={12} />
-                        </button>
-                        <span className={`text-sm flex-1 ${subtask.isCompleted ? 'line-through text-muted' : 'text-content'}`}>{subtask.text}</span>
-                        {subtaskDeleteConfirmId === subtask.id ? (
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                 setNewSubtasks(prev => prev.filter(s => s.id !== subtask.id));
-                                 setSubtaskDeleteConfirmId(null);
-                              }}
-                              className="p-1 text-red-400 hover:bg-red-400/10 rounded-full transition-colors"
-                            ><Check size={14} /></button>
-                            <button type="button" onClick={() => setSubtaskDeleteConfirmId(null)} className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"><X size={14} /></button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setSubtaskDeleteConfirmId(subtask.id)}
-                            className="p-1 text-muted hover:text-red-400 transition-colors"
-                          >
-                            <X size={14} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newSubtaskInput}
-                      onChange={(e) => setNewSubtaskInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (newSubtaskInput.trim()) {
-                            setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
-                            setNewSubtaskInput("");
-                          }
-                        }
-                      }}
-                      placeholder="Add a sub-task..."
-                      className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
-                    />
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks</label>
+            <div className="space-y-2 mb-3">
+              {newSubtasks.map((subtask) => (
+                <div key={subtask.id} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewSubtasks(prev => prev.map(s => s.id === subtask.id ? { ...s, isCompleted: !s.isCompleted } : s))}
+                    className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${subtask.isCompleted ? 'bg-primary border-primary text-background' : 'border-outline hover:border-muted text-transparent'}`}
+                  >
+                    <Check size={12} />
+                  </button>
+                  <span className={`text-sm flex-1 ${subtask.isCompleted ? 'line-through text-muted' : 'text-content'}`}>{subtask.text}</span>
+                  {subtaskDeleteConfirmId === subtask.id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                           setNewSubtasks(prev => prev.filter(s => s.id !== subtask.id));
+                           setSubtaskDeleteConfirmId(null);
+                        }}
+                        className="p-1 text-red-400 hover:bg-red-400/10 rounded-full transition-colors"
+                      ><Check size={14} /></button>
+                      <button type="button" onClick={() => setSubtaskDeleteConfirmId(null)} className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"><X size={14} /></button>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (newSubtaskInput.trim()) {
-                          setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
-                          setNewSubtaskInput("");
-                        }
-                      }}
-                      className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
+                      onClick={() => setSubtaskDeleteConfirmId(subtask.id)}
+                      className="p-1 text-muted hover:text-red-400 transition-colors"
                     >
-                      Add
+                      <X size={14} />
                     </button>
-                  </div>
+                  )}
                 </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Category</label>
-                  <select
-                    value={newTaskCategory}
-                    onChange={(e) => setNewTaskCategory(e.target.value as any)}
-                    className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
-                  >
-                    <option value="life">Life Focus</option>
-                    <option value="household">Household & Shopping</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Tag (Optional)</label>
-                  <input
-                    type="text"
-                    value={newTaskTag}
-                    onChange={(e) => setNewTaskTag(e.target.value)}
-                    placeholder={activeTab === 'life' ? "e.g. board prep" : activeTab === 'inbox' ? "e.g. thoughts" : "e.g. pet supplies"}
-                    className="input-minimal w-full"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
-                  <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
-                    <button type="button" onClick={() => setNewTaskPriority('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Low</button>
-                    <button type="button" onClick={() => setNewTaskPriority('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Medium</button>
-                    <button type="button" onClick={() => setNewTaskPriority('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>High</button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Effort Level</label>
-                  <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
-                    <button type="button" onClick={() => setNewTaskEffortLevel('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡</span> Low</button>
-                    <button type="button" onClick={() => setNewTaskEffortLevel('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡</span> Medium</button>
-                    <button type="button" onClick={() => setNewTaskEffortLevel('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡⚡</span> High</button>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <button 
-                    type="submit" 
-                    disabled={isSubmitting}
-                    className={`w-full btn-primary py-3 rounded-full shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-                  >
-                    {isSubmitting ? 'Saving...' : 'Save Task'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newSubtaskInput}
+                onChange={(e) => setNewSubtaskInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (newSubtaskInput.trim()) {
+                      setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
+                      setNewSubtaskInput("");
+                    }
+                  }
+                }}
+                placeholder="Add a sub-task..."
+                className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (newSubtaskInput.trim()) {
+                    setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
+                    setNewSubtaskInput("");
+                  }
+                }}
+                className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
+              >
+                Add
+              </button>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Category</label>
+            <select
+              value={newTaskCategory}
+              onChange={(e) => setNewTaskCategory(e.target.value as any)}
+              className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
+            >
+              <option value="life">Life Focus</option>
+              <option value="household">Household & Shopping</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Tag (Optional)</label>
+            <input
+              type="text"
+              value={newTaskTag}
+              onChange={(e) => setNewTaskTag(e.target.value)}
+              placeholder={activeTab === 'life' ? "e.g. board prep" : activeTab === 'inbox' ? "e.g. thoughts" : "e.g. pet supplies"}
+              className="input-minimal w-full"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
+            <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
+              <button type="button" onClick={() => setNewTaskPriority('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Low</button>
+              <button type="button" onClick={() => setNewTaskPriority('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Medium</button>
+              <button type="button" onClick={() => setNewTaskPriority('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>High</button>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Effort Level</label>
+            <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
+              <button type="button" onClick={() => setNewTaskEffortLevel('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡</span> Low</button>
+              <button type="button" onClick={() => setNewTaskEffortLevel('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡</span> Medium</button>
+              <button type="button" onClick={() => setNewTaskEffortLevel('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡⚡</span> High</button>
+            </div>
+          </div>
+
+          <div className="pt-8">
+            <button 
+              type="submit" 
+              disabled={isSubmitting}
+              className={`w-full btn-primary py-4 rounded-[16px] shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Task'}
+            </button>
+          </div>
+        </form>
+      </BottomSheet>
 
       {/* Edit Task Modal */}
-      <AnimatePresence>
-        {showEditTaskModal && editingTask && (
-          <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-end sm:justify-center p-4 z-50">
-            <motion.div 
-              initial={{ opacity: 0, y: 100 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 100 }}
-              className="bg-surface border border-outline p-6 rounded-[24px] sm:max-w-sm w-full shadow-2xl relative mb-4 sm:mb-0 max-h-[90vh] overflow-y-auto"
-            >
-              <button 
-                onClick={() => setShowEditTaskModal(false)}
-                className="absolute top-4 right-4 p-2 text-muted hover:text-content bg-outline/20 rounded-full transition-colors"
-                type="button"
-              >
-                <X size={16} />
-              </button>
-              <h2 className="text-xl font-light mb-6">Edit Task</h2>
-              
-              <form onSubmit={saveEditTask} className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="E.g., Renew insurance"
-                    className="input-minimal w-full bg-[var(--card-bg)]"
-                    autoFocus
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
-                  <textarea
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    placeholder="Add details..."
-                    className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks</label>
-                  <div className="space-y-2 mb-3">
-                    {editSubtasks.map((subtask) => (
-                      <div key={subtask.id} className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const updatedSubtasks = editSubtasks.map(s => s.id === subtask.id ? { ...s, isCompleted: !s.isCompleted } : s);
-                            setEditSubtasks(updatedSubtasks);
-                            if (editingTask) {
-                              setTasks(prev => prev.map(t => t.id === editingTask.id ? { ...t, subtasks: updatedSubtasks } : t));
-                              try {
-                                await dbService.updateTask(editingTask.id, { subtasks: updatedSubtasks });
-                              } catch (e) {
-                                console.error("Failed to sync subtask", e);
-                              }
-                            }
-                          }}
-                          className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${subtask.isCompleted ? 'bg-primary border-primary text-background' : 'border-outline hover:border-muted text-transparent'}`}
-                        >
-                          <Check size={12} />
-                        </button>
-                        <span className={`text-sm flex-1 ${subtask.isCompleted ? 'line-through text-muted' : 'text-content'}`}>{subtask.text}</span>
-                        {subtaskDeleteConfirmId === subtask.id ? (
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                 setEditSubtasks(prev => prev.filter(s => s.id !== subtask.id));
-                                 setSubtaskDeleteConfirmId(null);
-                              }}
-                              className="p-1 text-red-400 hover:bg-red-400/10 rounded-full transition-colors"
-                            ><Check size={14} /></button>
-                            <button type="button" onClick={() => setSubtaskDeleteConfirmId(null)} className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"><X size={14} /></button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setSubtaskDeleteConfirmId(subtask.id)}
-                            className="p-1 text-muted hover:text-red-400 transition-colors"
-                          >
-                            <X size={14} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={editSubtaskInput}
-                      onChange={(e) => setEditSubtaskInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (editSubtaskInput.trim()) {
-                            setEditSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: editSubtaskInput.trim(), isCompleted: false }]);
-                            setEditSubtaskInput("");
-                          }
-                        }
-                      }}
-                      placeholder="Add a sub-task..."
-                      className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (editSubtaskInput.trim()) {
-                          setEditSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: editSubtaskInput.trim(), isCompleted: false }]);
-                          setEditSubtaskInput("");
-                        }
-                      }}
-                      className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
-                    >
-                      Add
-                    </button>
-                    {!editSubtaskInput && (
-                      <button
-                        type="button"
-                        onClick={handleDecomposeEdit}
-                        disabled={isDecomposingEdit}
-                        title="Break it down with AI"
-                        className={`px-3 flex items-center justify-center rounded-xl text-sm font-medium transition-colors ${isDecomposingEdit ? 'bg-primary/20 text-primary opacity-70 cursor-not-allowed' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
-                      >
-                        <Sparkles size={16} className={isDecomposingEdit ? "animate-pulse" : ""} />
-                      </button>
-                    )}
-                    {backupSubtasksEdit && !editSubtaskInput && (
-                      <button
-                        type="button"
-                        onClick={handleRevertEdit}
-                        title="Revert AI Breakdown"
-                        className="px-2 flex items-center justify-center bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-colors"
-                      >
-                        <CornerUpLeft size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Context</label>
-                  <div className="flex bg-[var(--card-bg)] rounded-full p-1 border border-outline mt-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditCategory('life')}
-                      className={`flex-1 py-1.5 px-3 rounded-full text-xs font-semibold transition-all ${editCategory === 'life' ? 'bg-primary text-surface shadow-sm' : 'text-muted hover:text-content'}`}
-                    >
-                      Life
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditCategory('household')}
-                      className={`flex-1 py-1.5 px-3 rounded-full text-xs font-semibold transition-all ${editCategory === 'household' ? 'bg-primary text-surface shadow-sm' : 'text-muted hover:text-content'}`}
-                    >
-                      Household
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
-                  <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
-                    <button type="button" onClick={() => setEditPriority('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Low</button>
-                    <button type="button" onClick={() => setEditPriority('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Medium</button>
-                    <button type="button" onClick={() => setEditPriority('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>High</button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Effort Level</label>
-                  <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
-                    <button type="button" onClick={() => setEditEffortLevel('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡</span> Low</button>
-                    <button type="button" onClick={() => setEditEffortLevel('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡</span> Medium</button>
-                    <button type="button" onClick={() => setEditEffortLevel('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡⚡</span> High</button>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex flex-col gap-2">
-                  <button 
-                    type="submit" 
-                    disabled={isSubmitting}
-                    className={`w-full btn-primary py-3 rounded-full shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-                  >
-                    {isSubmitting ? 'Saving...' : 'Save Changes'}
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={deleteExistingTask} 
-                    disabled={isSubmitting}
-                    className={`w-full bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/40 py-3 rounded-full shadow-sm text-sm font-medium transition-colors ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-                  >
-                    {isSubmitting ? 'Deleting...' : confirmDelete ? 'Tap again to confirm delete' : 'Delete Task'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+      <BottomSheet isOpen={showEditTaskModal && !!editingTask} onClose={() => setShowEditTaskModal(false)}>
+        <h2 className="text-xl font-light mb-6">Edit Task</h2>
+        
+        <form onSubmit={saveEditTask} className="space-y-4">
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
+            <input
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              placeholder="E.g., Renew insurance"
+              className="input-minimal w-full bg-[var(--card-bg)]"
+              autoFocus
+            />
           </div>
-        )}
-      </AnimatePresence>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
+            <textarea
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              placeholder="Add details..."
+              className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks</label>
+            <div className="space-y-2 mb-3">
+              {editSubtasks.map((subtask) => (
+                <div key={subtask.id} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const updatedSubtasks = editSubtasks.map(s => s.id === subtask.id ? { ...s, isCompleted: !s.isCompleted } : s);
+                      setEditSubtasks(updatedSubtasks);
+                      if (editingTask) {
+                        setTasks(prev => prev.map(t => t.id === editingTask.id ? { ...t, subtasks: updatedSubtasks } : t));
+                        try {
+                          await dbService.updateTask(editingTask.id, { subtasks: updatedSubtasks });
+                        } catch (e) {
+                          console.error("Failed to sync subtask", e);
+                        }
+                      }
+                    }}
+                    className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${subtask.isCompleted ? 'bg-primary border-primary text-background' : 'border-outline hover:border-muted text-transparent'}`}
+                  >
+                    <Check size={12} />
+                  </button>
+                  <span className={`text-sm flex-1 ${subtask.isCompleted ? 'line-through text-muted' : 'text-content'}`}>{subtask.text}</span>
+                  {subtaskDeleteConfirmId === subtask.id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                           setEditSubtasks(prev => prev.filter(s => s.id !== subtask.id));
+                           setSubtaskDeleteConfirmId(null);
+                        }}
+                        className="p-1 text-red-400 hover:bg-red-400/10 rounded-full transition-colors"
+                      ><Check size={14} /></button>
+                      <button type="button" onClick={() => setSubtaskDeleteConfirmId(null)} className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"><X size={14} /></button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setSubtaskDeleteConfirmId(subtask.id)}
+                      className="p-1 text-muted hover:text-red-400 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={editSubtaskInput}
+                onChange={(e) => setEditSubtaskInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (editSubtaskInput.trim()) {
+                      setEditSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: editSubtaskInput.trim(), isCompleted: false }]);
+                      setEditSubtaskInput("");
+                    }
+                  }
+                }}
+                placeholder="Add a sub-task..."
+                className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (editSubtaskInput.trim()) {
+                    setEditSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: editSubtaskInput.trim(), isCompleted: false }]);
+                    setEditSubtaskInput("");
+                  }
+                }}
+                className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
+              >
+                Add
+              </button>
+              {!editSubtaskInput && (
+                <button
+                  type="button"
+                  onClick={handleDecomposeEdit}
+                  disabled={isDecomposingEdit}
+                  title="Break it down with AI"
+                  className={`px-3 flex items-center justify-center rounded-xl text-sm font-medium transition-colors ${isDecomposingEdit ? 'bg-primary/20 text-primary opacity-70 cursor-not-allowed' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
+                >
+                  <Sparkles size={16} className={isDecomposingEdit ? "animate-pulse" : ""} />
+                </button>
+              )}
+              {backupSubtasksEdit && !editSubtaskInput && (
+                <button
+                  type="button"
+                  onClick={handleRevertEdit}
+                  title="Revert AI Breakdown"
+                  className="px-2 flex items-center justify-center bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-colors"
+                >
+                  <CornerUpLeft size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Context</label>
+            <div className="flex bg-[var(--card-bg)] rounded-full p-1 border border-outline mt-2">
+              <button
+                type="button"
+                onClick={() => setEditCategory('life')}
+                className={`flex-1 py-1.5 px-3 rounded-full text-xs font-semibold transition-all ${editCategory === 'life' ? 'bg-primary text-surface shadow-sm' : 'text-muted hover:text-content'}`}
+              >
+                Life
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditCategory('household')}
+                className={`flex-1 py-1.5 px-3 rounded-full text-xs font-semibold transition-all ${editCategory === 'household' ? 'bg-primary text-surface shadow-sm' : 'text-muted hover:text-content'}`}
+              >
+                Household
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
+            <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
+              <button type="button" onClick={() => setEditPriority('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Low</button>
+              <button type="button" onClick={() => setEditPriority('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Medium</button>
+              <button type="button" onClick={() => setEditPriority('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>High</button>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Effort Level</label>
+            <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
+              <button type="button" onClick={() => setEditEffortLevel('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡</span> Low</button>
+              <button type="button" onClick={() => setEditEffortLevel('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡</span> Medium</button>
+              <button type="button" onClick={() => setEditEffortLevel('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡⚡</span> High</button>
+            </div>
+          </div>
+
+          <div className="pt-8 flex flex-col gap-2">
+            <button 
+              type="submit" 
+              disabled={isSubmitting}
+              className={`w-full btn-primary py-4 rounded-[16px] shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button 
+              type="button" 
+              onClick={deleteExistingTask} 
+              disabled={isSubmitting}
+              className={`w-full bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/40 py-4 rounded-[16px] shadow-sm text-sm font-medium transition-colors ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+            >
+              {isSubmitting ? 'Deleting...' : confirmDelete ? 'Tap again to confirm delete' : 'Delete Task'}
+            </button>
+          </div>
+        </form>
+      </BottomSheet>
 
       {/* Bottom Navigation */}
       <div className="fixed bottom-0 left-0 right-0 border-t border-outline pb-safe z-40 transition-colors duration-400 ease-in-out" style={{ backgroundColor: 'var(--nav-bg)', backdropFilter: 'blur(12px)' }}>
         <div className="flex max-w-md mx-auto relative px-2 py-2">
           <button
             onClick={() => { setActiveTab('inbox'); setActiveTag(null); }}
-            className={`flex-1 flex flex-col items-center gap-1 py-2 text-xs font-medium transition-colors ${activeTab === 'inbox' ? 'text-primary' : 'text-muted hover:text-content'}`}
+            className={`flex-1 flex flex-col items-center py-1 text-xs font-medium transition-colors ${activeTab === 'inbox' ? 'text-primary' : 'text-muted hover:text-content'}`}
           >
-            <Inbox size={20} className={activeTab === 'inbox' ? 'stroke-2' : 'stroke-[1.5]'} />
+            <CircularProgressIcon icon={Inbox} isActive={activeTab === 'inbox'} hasIndicator={inboxActiveCount > 0} />
             <span className="truncate">Unsorted</span>
           </button>
           <button
             onClick={() => { setActiveTab('life'); setActiveTag(null); }}
-            className={`flex-1 flex flex-col items-center gap-1 py-2 text-xs font-medium transition-colors ${activeTab === 'life' ? 'text-primary' : 'text-muted hover:text-content'}`}
+            className={`flex-1 flex flex-col items-center py-1 text-xs font-medium transition-colors ${activeTab === 'life' ? 'text-primary' : 'text-muted hover:text-content'}`}
           >
-            <UserTab size={20} className={activeTab === 'life' ? 'stroke-2' : 'stroke-[1.5]'} />
+            <CircularProgressIcon icon={UserTab} isActive={activeTab === 'life'} percentage={lifePercentage} />
             <span>Life</span>
           </button>
           <button
             onClick={() => { setActiveTab('household'); setActiveTag(null); }}
-             className={`flex-1 flex flex-col items-center gap-1 py-2 text-xs font-medium transition-colors ${activeTab === 'household' ? 'text-primary' : 'text-muted hover:text-content'}`}
+             className={`flex-1 flex flex-col items-center py-1 text-xs font-medium transition-colors ${activeTab === 'household' ? 'text-primary' : 'text-muted hover:text-content'}`}
           >
-            <Home size={20} className={activeTab === 'household' ? 'stroke-2' : 'stroke-[1.5]'} />
+            <CircularProgressIcon icon={Home} isActive={activeTab === 'household'} percentage={householdPercentage} />
             <span className="truncate">Home</span>
           </button>
           <button
             onClick={() => { setActiveTab('routines'); setActiveTag(null); }}
-            className={`flex-1 flex flex-col items-center gap-1 py-2 text-xs font-medium transition-colors ${activeTab === 'routines' ? 'text-primary' : 'text-muted hover:text-content'}`}
+            className={`flex-1 flex flex-col items-center py-1 text-xs font-medium transition-colors ${activeTab === 'routines' ? 'text-primary' : 'text-muted hover:text-content'}`}
           >
-            <Repeat size={20} className={activeTab === 'routines' ? 'stroke-2' : 'stroke-[1.5]'} />
+            <CircularProgressIcon icon={Repeat} isActive={activeTab === 'routines'} percentage={routinesPercentage} />
             <span className="truncate">Routines</span>
           </button>
         </div>
@@ -2155,38 +2464,23 @@ const Dashboard = () => {
       </button>
 
       {/* Quick Capture Modal */}
-      <AnimatePresence>
-        {showQuickCapture && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center p-4 bg-background/80 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, y: "100%" }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: "100%" }}
-              className="w-full max-w-md bg-surface border border-outline rounded-[32px] shadow-2xl p-6 mb-24"
-            >
-              <form onSubmit={handleQuickCapture} className="flex items-center gap-4">
-                <input
-                  ref={quickInputRef}
-                  type="text"
-                  value={quickCaptureInput}
-                  onChange={e => setQuickCaptureInput(e.target.value)}
-                  className="flex-1 bg-transparent border-none text-xl outline-none placeholder:text-muted/50 font-light"
-                  placeholder="Brain dump..."
-                />
-                <button type="submit" className="w-12 h-12 rounded-full bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-lg hover:bg-indigo-600 transition-colors" disabled={!quickCaptureInput.trim() || isSubmitting}>
-                  <ArrowUp size={24} />
-                </button>
-              </form>
-            </motion.div>
-            
-            {/* Click outside to close */}
-            <div 
-              className="absolute inset-0 -z-10" 
-              onClick={() => setShowQuickCapture(false)} 
-            />
+      <BottomSheet isOpen={showQuickCapture} onClose={() => setShowQuickCapture(false)}>
+        <form onSubmit={handleQuickCapture} className="flex flex-col gap-4">
+          <input
+            ref={quickInputRef}
+            type="text"
+            value={quickCaptureInput}
+            onChange={e => setQuickCaptureInput(e.target.value)}
+            className="w-full bg-transparent border-none text-2xl outline-none placeholder:text-muted/50 font-light mb-4"
+            placeholder="Brain dump..."
+          />
+          <div className="flex justify-end">
+             <button type="submit" className="px-6 py-3 rounded-full bg-indigo-500 text-white shadow-lg hover:bg-indigo-600 transition-colors font-medium text-sm flex items-center justify-center min-w-[120px]" disabled={!quickCaptureInput.trim() || isSubmitting}>
+               {isSubmitting ? 'Saving...' : 'Add Task'}
+             </button>
           </div>
-        )}
-      </AnimatePresence>
+        </form>
+      </BottomSheet>
 
       {/* Error Toast */}
       <AnimatePresence>
@@ -2208,31 +2502,32 @@ const Dashboard = () => {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {activeFocusTask && (
-          <FocusModeOverlay
-            task={{...activeFocusTask, taskId: activeFocusTask.taskId, subtaskId: activeFocusTask.subtaskId, title: activeFocusTask.title}}
-            onClose={() => setActiveFocusTask(null)}
-            onComplete={async (taskId, subtaskId) => {
-              const task = tasks.find(t => t.id === taskId);
-              if (task && task.subtasks) {
-                const updatedSubtasks = task.subtasks.map((s, sIdx) => 
-                  ((s.id || sIdx.toString()) === subtaskId) ? { ...s, isCompleted: true } : s
-                );
-                setTasks(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: updatedSubtasks } : t));
-                setActiveFocusTask(null);
-                try {
-                  await dbService.updateTask(taskId, { subtasks: updatedSubtasks });
-                } catch (error) {
-                  console.error("Failed to mark subtask complete", error);
-                }
-              } else {
-                setActiveFocusTask(null);
-              }
-            }}
-          />
-        )}
-      </AnimatePresence>
+      <FocusIsland
+        activeFocusTask={activeFocusTask}
+        rouletteTask={rouletteSelectedTaskId ? { id: rouletteSelectedTaskId, title: tasks.find(t => t.id === rouletteSelectedTaskId)?.title || 'Selected Task' } : null}
+        onClearFocus={() => setActiveFocusTask(null)}
+        onClearRoulette={() => setRouletteSelectedTaskId(null)}
+        onCompleteFocus={async (taskId, subtaskId) => {
+          const task = tasks.find(t => t.id === taskId);
+          if (task && task.subtasks && subtaskId) {
+            const updatedSubtasks = task.subtasks.map((s, sIdx) => 
+              ((s.id || sIdx.toString()) === subtaskId) ? { ...s, isCompleted: true } : s
+            );
+            setTasks(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: updatedSubtasks } : t));
+            setActiveFocusTask(null);
+            try {
+              await dbService.updateTask(taskId, { subtasks: updatedSubtasks });
+            } catch (error) {
+              console.error("Failed to mark subtask complete", error);
+            }
+          } else {
+            setActiveFocusTask(null);
+          }
+        }}
+        onCompleteRoulette={(taskId) => {
+           completeTask(taskId);
+        }}
+      />
 
       <AnimatePresence>
         {confirmResetApp && (

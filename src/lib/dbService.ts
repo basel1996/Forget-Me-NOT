@@ -38,6 +38,7 @@ interface Task {
   completionHistory?: string[];
   lastCompletedDate?: string | null;
   subtasks?: { id: string, text: string, isCompleted: boolean }[];
+  effortLevel?: 'low' | 'medium' | 'high';
 }
 
 export const dbService = {
@@ -97,6 +98,48 @@ export const dbService = {
     } catch (error) {
       console.error("Error getting tasks:", error);
       throw error;
+    }
+  },
+  getCompletedTasksToday: async (userId: string) => {
+    try {
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      
+      const tasksRef = collection(db, 'tasks');
+      const q = query(
+        tasksRef, 
+        where('userId', '==', userId), 
+        where('status', '==', 'completed'),
+        // No orderBy on completedAt here because we don't know if the compound index exists.
+        // We'll just fetch a limit of 150 which is reasonable for a day's worth of completed tasks.
+        firestoreLimit(150)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      
+      const todayCount = { life: 0, household: 0, routines: 0 };
+      
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        let completedAtDate;
+        if (data.completedAt) {
+           completedAtDate = data.completedAt instanceof Timestamp ? data.completedAt.toDate() : new Date(data.completedAt);
+        }
+        
+        if (completedAtDate && completedAtDate >= startOfDay) {
+          if (data.isRecurring) {
+            todayCount.routines++;
+          } else if (data.category === 'life') {
+            todayCount.life++;
+          } else if (data.category === 'household') {
+             todayCount.household++;
+          }
+        }
+      });
+      return todayCount;
+    } catch (e) {
+      console.error("Error fetching completed tasks today", e);
+      return { life: 0, household: 0, routines: 0 };
     }
   },
   saveTask: async (id: string, taskData: Omit<Task, 'id' | 'createdAt'>) => {
