@@ -1,0 +1,6 @@
+{
+  "name": "Forget-Me-Not",
+  "description": "A proactive, context-aware digital assistant that anticipates your needs based on your profile and recent activity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

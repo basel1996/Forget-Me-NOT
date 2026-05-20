@@ -1,0 +1,157 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-base: var(--bg-color);
+  --color-content: var(--text-primary);
+  --color-muted: var(--text-secondary);
+  --color-surface: var(--card-bg);
+  --color-outline: var(--card-border);
+  --color-primary: var(--accent-primary);
+  --color-success: var(--accent-secondary);
+}
+
+:root {
+  /* Default to household */
+  --bg-color: #f8f5f2;
+  --text-primary: #1c1917;
+  --text-secondary: #78716c;
+  --card-bg: #ffffff;
+  --card-border: #e7e5e4;
+  --accent-primary: #f97316;
+  --accent-secondary: #84cc16;
+  --btn-primary-bg: #f97316;
+  --btn-primary-text: #ffffff;
+  --input-bg: #ffffff;
+  --nav-bg: rgba(248, 245, 242, 0.85);
+  --font-family: 'Lora', serif;
+}
+
+[data-theme="inbox"] {
+  --bg-color: #0f1115;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --card-bg: #191b23;
+  --card-border: #2e3342;
+  --accent-primary: #6366f1;
+  --accent-secondary: #ec4899;
+  --btn-primary-bg: #6366f1;
+  --btn-primary-text: #ffffff;
+  --input-bg: #0f1115;
+  --nav-bg: rgba(15, 17, 21, 0.85);
+  --font-family: 'Inter', sans-serif;
+}
+
+[data-theme="life"] {
+  --bg-color: #0f172a;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --card-bg: #1e293b;
+  --card-border: #334155;
+  --accent-primary: #3b82f6;
+  --accent-secondary: #10b981;
+  --btn-primary-bg: #3b82f6;
+  --btn-primary-text: #ffffff;
+  --input-bg: #0f172a;
+  --nav-bg: rgba(15, 23, 42, 0.85);
+  --font-family: 'Inter', sans-serif;
+}
+
+[data-theme="routines"] {
+  --bg-color: #1a172b;
+  --text-primary: #f8fafc;
+  --text-secondary: #a7a7cc;
+  --card-bg: #26223e;
+  --card-border: #3e3860;
+  --accent-primary: #c084fc;
+  --accent-secondary: #34d399;
+  --btn-primary-bg: #c084fc;
+  --btn-primary-text: #1a172b;
+  --input-bg: #1a172b;
+  --nav-bg: rgba(26, 23, 43, 0.85);
+  --font-family: 'Inter', sans-serif;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  transition: background-color 0.4s ease-in-out, color 0.4s ease-in-out;
+  padding-bottom: 80px;
+  -webkit-font-smoothing: antialiased;
+}
+
+*, *::before, *::after {
+  transition: background-color 0.4s ease-in-out, border-color 0.4s ease-in-out, color 0.4s ease-in-out, fill 0.4s ease-in-out, stroke 0.4s ease-in-out;
+}
+
+input, textarea, select {
+  color: var(--text-primary) !important;
+  caret-color: var(--accent-primary) !important;
+  background-color: var(--input-bg);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-secondary) !important;
+  opacity: 0.7 !important;
+}
+
+.distraction-free {
+  @apply w-full max-w-md mx-auto px-4 py-8;
+}
+
+.card-minimal {
+  background-color: var(--card-bg);
+  border: 1px solid var(--card-border);
+  @apply p-4 rounded-[20px] shadow-sm;
+}
+
+.btn-primary {
+  background-color: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  @apply px-6 py-3 rounded-2xl font-medium text-sm w-full flex justify-center items-center gap-2 transition-transform;
+  border: none;
+}
+.btn-primary:active {
+  transform: scale(0.95);
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+}
+
+.btn-secondary {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  @apply px-6 py-3 rounded-2xl font-medium transition-transform active:scale-95 text-sm;
+}
+
+.input-minimal {
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  @apply w-full px-4 py-4 rounded-2xl outline-none text-base transition-shadow;
+}
+.input-minimal:focus {
+  box-shadow: 0 0 0 2px var(--accent-primary);
+}
+.input-minimal::placeholder {
+  color: var(--text-secondary);
+}
+
+.task-completed {
+  @apply opacity-40 line-through;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.mask-linear-right {
+  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
