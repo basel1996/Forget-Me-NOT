@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { AuthProvider, useAuth } from "./components/AuthProvider";
 import { auth, googleProvider, signInWithPopup } from "./lib/firebase";
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { dbService } from "./lib/dbService";
 import { LogIn, User as UserIcon, Plus, Check, X, Sparkles, LogOut, Settings as SettingsIcon, ArrowLeft, Home, User as UserTab, ArrowDown, ArrowUp, Repeat, RotateCcw, Archive, Trash2, Inbox, Play, Trophy, Activity, AlertTriangle, CornerUpLeft, Coffee, Wind, Leaf, Moon, Cloud, Feather, Sun, Mountain, Compass, Waves } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform } from "motion/react";
@@ -11,6 +13,13 @@ import { BottomSheet } from "./components/BottomSheet";
 import { useCircadian } from "./hooks/useCircadian";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
 import { SyncIndicator } from "./components/SyncIndicator";
+
+// Initialize the plugin
+GoogleAuth.initialize({
+  clientId: 'PASTE_YOUR_WEB_CLIENT_ID_HERE',
+  scopes: ['profile', 'email'],
+  grantOfflineAccess: true,
+});
 
 interface Task {
   id: string;
@@ -51,9 +60,19 @@ const Login = () => {
 
   const handleLogin = async () => {
     try {
-      await signInWithPopup();
+      // 1. Trigger the native Android Google login prompt
+      const googleUser = await GoogleAuth.signIn();
+
+      // 2. Take the secure token Android gives us and hand it to Firebase
+      const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+
+      // 3. Log into Firebase securely!
+      await signInWithCredential(auth, credential);
+      
+      console.log("Successfully logged in on mobile!");
+
     } catch (error) {
-      console.error("Login failed", error);
+      console.error("Mobile login failed:", error);
     }
   };
 
