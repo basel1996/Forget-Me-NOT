@@ -1,9 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { AuthProvider, useAuth } from "./components/AuthProvider";
-import { auth, googleProvider, signInWithPopup } from "./lib/firebase";
-import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
-import { dbService } from "./lib/dbService";
+import { storageService } from "./lib/storageService";
 import { LogIn, User as UserIcon, Plus, Check, X, Sparkles, LogOut, Settings as SettingsIcon, ArrowLeft, Home, User as UserTab, ArrowDown, ArrowUp, Repeat, RotateCcw, Archive, Trash2, Inbox, Play, Trophy, Activity, AlertTriangle, CornerUpLeft, Coffee, Wind, Leaf, Moon, Cloud, Feather, Sun, Mountain, Compass, Waves, Download, UploadCloud } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform } from "motion/react";
 import { HistoryView } from "./HistoryView";
@@ -11,30 +7,13 @@ import { FocusIsland } from "./components/FocusIsland";
 import { WeeklyWinsDashboard } from "./components/WeeklyWinsDashboard";
 import { BottomSheet } from "./components/BottomSheet";
 import { useCircadian } from "./hooks/useCircadian";
-import { useNetworkStatus } from "./hooks/useNetworkStatus";
-import { SyncIndicator } from "./components/SyncIndicator";
-
-import { Capacitor } from '@capacitor/core';
-// Initialize the plugin
-try {
-  if (Capacitor.isNativePlatform()) {
-    GoogleAuth.initialize({
-      clientId: 'PASTE_YOUR_WEB_CLIENT_ID_HERE',
-      scopes: ['profile', 'email'],
-      grantOfflineAccess: true,
-    });
-  }
-} catch (e) {
-  console.error("Failed to initialize GoogleAuth", e);
-}
 
 interface Task {
   id: string;
-  userId: string;
   title: string;
   description: string;
-  status: 'active' | 'completed' | 'dismissed';
-  category: 'life' | 'household' | 'inbox';
+  status: 'active' | 'completed';
+  category?: 'life' | 'household' | 'inbox';
   createdAt: string;
   completedAt?: string;
   tag?: string;
@@ -59,60 +38,6 @@ interface Suggestion {
   subtasks?: { text: string, isCompleted: boolean }[];
   effortLevel?: 'low' | 'medium' | 'high';
 }
-
-const Login = () => {
-  const { offlineLogin } = useAuth();
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', 'household');
-  }, []);
-
-  const handleLogin = async () => {
-    try {
-      if (Capacitor.isNativePlatform()) {
-        // 1. Trigger the native Android Google login prompt
-        const googleUser = await GoogleAuth.signIn();
-        
-        // Save the Google user locally in case Firebase fails due to being offline
-        offlineLogin(googleUser);
-
-        // 2. Take the secure token Android gives us and hand it to Firebase
-        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
-
-        // 3. Log into Firebase securely!
-        await signInWithCredential(auth, credential);
-        
-        console.log("Successfully logged in on mobile!");
-      } else {
-        await signInWithPopup();
-      }
-    } catch (error) {
-      console.error("Login failed:", error);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-base px-4">
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="text-center w-full max-w-sm"
-      >
-        <h1 className="text-4xl font-light tracking-tight mb-8">Forget-Me-Not</h1>
-        <p className="text-muted mb-8 font-light">Your proactive digital assistant.</p>
-        <div className="flex flex-col gap-4">
-          <button onClick={handleLogin} className="btn-primary">
-            <LogIn size={18} />
-            Continue with Google
-          </button>
-          <button onClick={() => offlineLogin({uid: 'offline-user', email: 'guest@offline', displayName: 'Guest (Offline)', photoURL: ''})} className="btn-secondary py-3 px-4 flex items-center justify-center gap-2 rounded-xl bg-surface hover:bg-surface-active transition-colors text-muted hover:text-default">
-            <Cloud size={18} className="opacity-70" />
-            Continue Offline
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-};
 
 const TaskDetails = ({ task, isCompleting, onUpdateSubtask, onStartFocus }: { task: Partial<Task>, isCompleting: boolean, onUpdateSubtask?: (subtasks: any[]) => void, onStartFocus?: (taskId: string, subtaskId: string, text: string) => void }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -428,7 +353,7 @@ const CircularProgressIcon = ({
 };
 
 const Dashboard = () => {
-  const { user, offlineLogout } = useAuth();
+  
   const phase = useCircadian();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [completedTasksCount, setCompletedTasksCount] = useState({ life: 0, household: 0, routines: 0 });
@@ -490,22 +415,22 @@ const Dashboard = () => {
   useEffect(() => {
     // Initial load
     setHasUnsyncedChanges(localStorage.getItem('has_unsynced_changes') === 'true');
-    setLastSyncedAt(localStorage.getItem(`fmn_last_synced_${user?.uid}`) || null);
+    setLastSyncedAt(localStorage.getItem(`fmn_last_synced_`) || null);
     
     const handleLocalTasksUpdate = () => {
       setHasUnsyncedChanges(localStorage.getItem('has_unsynced_changes') === 'true');
-      setLastSyncedAt(localStorage.getItem(`fmn_last_synced_${user?.uid}`) || null);
+      setLastSyncedAt(localStorage.getItem(`fmn_last_synced_`) || null);
     };
     
     window.addEventListener('local_tasks_updated', handleLocalTasksUpdate);
     return () => window.removeEventListener('local_tasks_updated', handleLocalTasksUpdate);
-  }, [user]);
+  }, []);
 
   const handleManualSync = async () => {
-    if (!user) return;
+    
     setIsSyncing(true);
     try {
-      await dbService.syncWithCloud(user.uid);
+      
       setToastError("Sync successful!"); // This will show a standard toast text
     } catch (error) {
       console.error(error);
@@ -565,9 +490,8 @@ const Dashboard = () => {
   const [routineInterval, setRoutineInterval] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
   const [routineCategory, setRoutineCategory] = useState<'life' | 'household'>('life');
   const [routinePriority, setRoutinePriority] = useState<'low' | 'medium' | 'high'>('medium');
-  const isOnline = useNetworkStatus();
-  const isOffline = !isOnline;
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline_saved'>('synced');
+  const isOffline = false;
+  
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -579,28 +503,24 @@ const Dashboard = () => {
     const taskToDelete = tasks.find(t => t.id === id);
     setTasks(prev => prev.filter(t => t.id !== id));
     
-    if (isOffline) {
-      setSyncStatus('offline_saved');
-    } else {
-      setSyncStatus('syncing');
-      try {
-        if (!String(id).startsWith('temp-')) {
-          await dbService.deleteTask(id);
-        }
-        setSyncStatus('synced');
-      } catch (error) {
+    
+      
+    try {
+      if (!String(id).startsWith('temp-')) {
+        await storageService.deleteTask(id);
+      }
+    } catch (error) {
         if (taskToDelete) {
           setTasks(prev => [...prev, taskToDelete]);
         }
         setToastError("Failed to delete task.");
         console.error("Failed to delete task:", error);
       }
-    }
     setDeleteConfirmId(null);
   };
 
   const executeClearAllTasks = async () => {
-    if (!user) return;
+    
     
     // 1. Identify the tasks currently showing on the screen for this tab
     const currentTasks = tasks.filter(t => 
@@ -615,12 +535,7 @@ const Dashboard = () => {
     setTasks(prev => prev.filter(t => 
         !(activeTab === 'routines' ? t.isRecurring : (!t.isRecurring && t.category === activeTab))
     ));
-    
-    if (isOffline) {
-        setSyncStatus('offline_saved');
-    } else {
-        setSyncStatus('syncing');
-        try {
+    try {
             // 2. SAFETY CHECK: Only send REAL Firebase IDs to the database
             const realTaskIds = currentTasks
                 .map(t => t.id)
@@ -628,16 +543,13 @@ const Dashboard = () => {
 
             // 3. Only fire the database call if there are actual database documents to delete
             if (realTaskIds.length > 0) {
-                await dbService.clearTasks(realTaskIds);
+                await storageService.clearTasks(realTaskIds);
             }
-            setSyncStatus('synced');
         } catch (error) {
             setTasks(previousTasks); // Rollback
             setToastError("Failed to clear tasks.");
             console.error("Failed to clear tasks:", error);
         }
-    }
-    
     setIsClearing(false);
     setClearAllConfirm(false);
   };
@@ -690,7 +602,7 @@ const Dashboard = () => {
 
   const saveEditTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingTask || !editTitle.trim() || !user || isSubmitting) return;
+    if (!editingTask || !editTitle.trim() ||  isSubmitting) return;
     
     setIsSubmitting(true);
     // Optimistic UI update
@@ -706,7 +618,7 @@ const Dashboard = () => {
     setShowEditTaskModal(false);
     setIsSubmitting(false);
 
-    dbService.updateTask(editingTask.id, {
+    storageService.updateTask(editingTask.id, {
       title: editTitle,
       description: editDescription,
       category: editCategory,
@@ -718,7 +630,7 @@ const Dashboard = () => {
   };
 
   const deleteExistingTask = async () => {
-    if (!editingTask || !user || isSubmitting) return;
+    if (!editingTask ||  isSubmitting) return;
     
     if (!confirmDelete) {
       setConfirmDelete(true);
@@ -727,7 +639,7 @@ const Dashboard = () => {
 
     setIsSubmitting(true);
     try {
-      await dbService.deleteTask(editingTask.id);
+      await storageService.deleteTask(editingTask.id);
       
       setTasks(prev => prev.filter(t => t.id !== editingTask.id));
       setShowEditTaskModal(false);
@@ -743,13 +655,13 @@ const Dashboard = () => {
 
   const addRoutine = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!routineTitle.trim() || !user || isSubmitting) return;
+    if (!routineTitle.trim() ||  isSubmitting) return;
     
     setIsSubmitting(true);
     // Optimistic UI update for routine with pre-generated ID
-    const firestoreId = dbService.getNewTaskId();
+    const firestoreId = storageService.getNewTaskId();
     const newRoutineData: Omit<Task, 'id' | 'createdAt'> = {
-      userId: user.uid,
+      
       title: routineTitle,
       description: routineDescription,
       status: 'active',
@@ -772,16 +684,16 @@ const Dashboard = () => {
     setIsSubmitting(false);
 
     try {
-      await dbService.saveTask(firestoreId, newRoutineData);
+      await storageService.saveTask(firestoreId, newRoutineData);
     } catch (error) {
       console.error("Failed to background sync routine", error);
     }
   };
 
   const fetchTasks = async (status: 'active' | 'completed' = 'active') => {
-    if (!user) return;
+    
     try {
-      const data = await dbService.getTasks(user.uid, status, status === 'completed' ? 50 : undefined);
+      const data = await storageService.getTasks(status, status === 'completed' ? 50 : undefined);
       setTasks(data);
     } catch (error) {
       if (!navigator.onLine) {
@@ -794,9 +706,9 @@ const Dashboard = () => {
   };
 
   const fetchCompletedTasksCount = async () => {
-    if (!user) return;
+    
     try {
-      const counts = await dbService.getCompletedTasksToday(user.uid);
+      const counts = await storageService.getCompletedTasksToday();
       setCompletedTasksCount(counts);
     } catch (e) {
       console.error(e);
@@ -812,11 +724,11 @@ const Dashboard = () => {
   }, [activeTab, phase]);
 
   useEffect(() => {
-    if (!user) return;
+    
 
     const fetchProfile = async () => {
       try {
-        const data = await dbService.getProfile(user.uid);
+        const data = await storageService.getProfile();
         setBio(data.bio || "{}");
       } catch (error) {
         console.error("Failed to fetch profile", error);
@@ -826,7 +738,7 @@ const Dashboard = () => {
     fetchProfile();
     fetchTasks();
     fetchCompletedTasksCount();
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     if (!showHistory) {
@@ -848,14 +760,14 @@ const Dashboard = () => {
 
   const handleQuickCapture = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickCaptureInput.trim() || !user || isSubmitting) return;
+    if (!quickCaptureInput.trim() ||  isSubmitting) return;
 
     setIsSubmitting(true);
     const title = quickCaptureInput.trim();
 
-    const firestoreId = dbService.getNewTaskId();
+    const firestoreId = storageService.getNewTaskId();
     const newTaskData: Omit<Task, 'id' | 'createdAt'> = {
-      userId: user.uid,
+      
       title,
       description: '',
       status: 'active',
@@ -863,30 +775,25 @@ const Dashboard = () => {
       isRecurring: false,
       priority: 'medium',
       subtasks: [],
-      effortLevel: 'medium'
-    };
+      effortLevel: 'medium', completedAt: null };
 
     setTasks(prev => [{ id: firestoreId, ...newTaskData, createdAt: new Date().toISOString() } as Task, ...prev]);
     setQuickCaptureInput("");
     setShowQuickCapture(false);
     setIsSubmitting(false);
 
-    if (isOffline) {
-      setSyncStatus('offline_saved');
-    } else {
-      setSyncStatus('syncing');
+    
+      
       try {
-        await dbService.saveTask(firestoreId, newTaskData);
-        setSyncStatus('synced');
+        await storageService.saveTask(firestoreId, newTaskData);
       } catch (error) {
         console.error("Failed to background sync quick capture task", error);
       }
-    }
   };
 
   const addTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTaskTitle.trim() || !user || isSubmitting) return;
+    if (!newTaskTitle.trim() ||  isSubmitting) return;
     
     setIsSubmitting(true);
     let title = newTaskTitle;
@@ -900,9 +807,9 @@ const Dashboard = () => {
     const taskCategory = newTaskCategory;
 
     // Optimistic UI update for task with pre-generated ID
-    const firestoreId = dbService.getNewTaskId();
+    const firestoreId = storageService.getNewTaskId();
     const newTaskData: Omit<Task, 'id' | 'createdAt'> = {
-      userId: user.uid,
+      
       title,
       description: newTaskDescription,
       status: 'active',
@@ -925,17 +832,13 @@ const Dashboard = () => {
     setShowTaskModal(false);
     setIsSubmitting(false);
 
-    if (isOffline) {
-      setSyncStatus('offline_saved');
-    } else {
-      setSyncStatus('syncing');
+    
+      
       try {
-        await dbService.saveTask(firestoreId, newTaskData);
-        setSyncStatus('synced');
+        await storageService.saveTask(firestoreId, newTaskData);
       } catch (error) {
         console.error("Failed to background sync added task", error);
       }
-    }
   };
 
   useEffect(() => {
@@ -971,28 +874,20 @@ const Dashboard = () => {
     setTimeout(async () => {
       // Fully optimistic removal from local state
       setTasks(prev => prev.filter(t => t.id !== id));
-      
-      if (isOffline) {
-        setSyncStatus('offline_saved');
+      try {
+        await storageService.completeTask(id);
+        fetchCompletedTasksCount();
+      } catch (error) {
+        console.error("Failed to complete task", error);
+      } finally {
         setCompletingIds(prev => prev.filter(compId => compId !== id));
-      } else {
-        setSyncStatus('syncing');
-        try {
-          await dbService.completeTask(id);
-          setSyncStatus('synced');
-          fetchCompletedTasksCount();
-        } catch (error) {
-          console.error("Failed to complete task", error);
-        } finally {
-          setCompletingIds(prev => prev.filter(compId => compId !== id));
-        }
       }
     }, 500); // Wait for the visual strike-through animation
   };
 
   const undoTask = async (id: string) => {
     try {
-      await dbService.undoTask(id);
+      await storageService.undoTask(id);
       fetchTasks();
       fetchCompletedTasksCount();
     } catch (error) {
@@ -1028,7 +923,7 @@ const Dashboard = () => {
       const sortedResults = data.sortedResults || [];
       if (sortedResults.length > 0) {
         // Update database
-        await dbService.updateTasksBatch(sortedResults);
+        await storageService.updateTasksBatch(sortedResults);
         
         // Update local state instantly
         setTasks(prev => prev.map(task => {
@@ -1053,7 +948,7 @@ const Dashboard = () => {
   };
 
   const generateSuggestions = async () => {
-    if (!user || !bio || bio === "{}" || isOffline) return;
+    if ( !bio || bio === "{}" || isOffline) return;
     setLoadingSuggestions(true);
     setIsTakingLong(false);
     
@@ -1065,7 +960,7 @@ const Dashboard = () => {
     const timeoutId = setTimeout(() => setIsTakingLong(true), 30000);
     
     try {
-      const allTasks = await dbService.getTasks(user.uid, 'completed');
+      const allTasks = await storageService.getTasks('completed');
       const completedTitles = allTasks
         .filter((t: Task) => t.category === activeTab)
         .slice(0, 8)
@@ -1080,7 +975,7 @@ const Dashboard = () => {
         signal: controller.signal,
         headers: { 
           "Content-Type": "application/json",
-          'x-user-id': user.uid
+          'x-user-id': 'local'
         },
         body: JSON.stringify({
           bio,
@@ -1117,8 +1012,8 @@ const Dashboard = () => {
   };
 
   const acceptSuggestion = async (suggestion: Suggestion) => {
-    if (!user) return;
-    const firestoreId = dbService.getNewTaskId();
+    
+    const firestoreId = storageService.getNewTaskId();
     try {
       const parsedSubtasks = suggestion.subtasks?.map((st, idx) => ({
         id: `ai-st-${Date.now()}-${idx}`,
@@ -1131,7 +1026,7 @@ const Dashboard = () => {
       
       // Optimistic UI update
       const newTaskData: Omit<Task, 'id' | 'createdAt'> = {
-        userId: user.uid,
+        
         title: suggestion.title,
         description: suggestion.description,
         status: 'active',
@@ -1150,7 +1045,7 @@ const Dashboard = () => {
         [activeTab]: prev[activeTab].filter(s => s.title !== suggestion.title)
       }));
 
-      await dbService.saveTask(firestoreId, newTaskData);
+      await storageService.saveTask(firestoreId, newTaskData);
     } catch (error) {
       if (isOffline) setToastError("Saved locally. Syncing when online.");
       else {
@@ -1170,9 +1065,9 @@ const Dashboard = () => {
   };
 
   const exportData = async () => {
-    if (!user) return;
+    
     try {
-      const allTasks = await dbService.getTasks(user.uid);
+      const allTasks = await storageService.getTasks();
       const backup = {
         version: 1,
         exportedAt: new Date().toISOString(),
@@ -1206,7 +1101,7 @@ const Dashboard = () => {
   };
 
   const executeImport = () => {
-    if (!importFile || !user) return;
+    if (!importFile ) return;
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
@@ -1214,20 +1109,20 @@ const Dashboard = () => {
         const backup = JSON.parse(content);
         if (!backup.tasks) throw new Error("Invalid backup file: Missing tasks array");
         
-        const currentTasks = await dbService.getTasks(user.uid);
+        const currentTasks = await storageService.getTasks();
         if (currentTasks.length > 0) {
-          await dbService.clearTasks(currentTasks.map(t => t.id));
+          await storageService.clearTasks(currentTasks.map(t => t.id));
         }
         
         const importedTasks = backup.tasks.map((t: any) => ({
           ...t,
-          userId: user.uid
+          userId: ""
         }));
         
-        await dbService.importTasksBatch(importedTasks);
+        await storageService.replaceAllTasks(importedTasks);
         
         if (backup.bio && typeof backup.bio === 'string') {
-          await dbService.saveProfile(user.uid, backup.bio);
+          await storageService.saveProfile( backup.bio);
           setBio(backup.bio);
         }
         
@@ -1248,36 +1143,15 @@ const Dashboard = () => {
   };
 
   const processAndSaveProfile = async () => {
-    if (!user || !rawProfileText.trim()) return;
-    if (isOffline) {
-       setToastError("You appear to be offline. Please connect to internet to parse profile.");
-       setTimeout(() => setToastError(null), 3000);
-       return;
-    }
+    if (!rawProfileText.trim()) return;
     setSavingProfile(true);
     try {
-      const res = await fetch('/api/profile/parse', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-id': user.uid
-        },
-        body: JSON.stringify({ rawText: rawProfileText })
-      });
-      if (!res.ok) {
-        throw new Error("Failed to parse");
-      }
-      const data = await res.json();
-      if (data.success) {
-        setBio(data.bio);
-        setShowProfile(false);
-      } else {
-        setToastError("Failed to parse profile. Please try again.");
-        setTimeout(() => setToastError(null), 3000);
-      }
+      await storageService.saveProfile(rawProfileText.trim());
+      setBio(rawProfileText.trim());
+      setShowProfile(false);
     } catch (error) {
       console.error("Failed to save profile", error);
-      setToastError("An error occurred while parsing. Please check your connection.");
+      setToastError("An error occurred while saving profile.");
       setTimeout(() => setToastError(null), 3000);
     } finally {
       setSavingProfile(false);
@@ -1429,9 +1303,9 @@ const Dashboard = () => {
   });
 
   const togglePauseTask = async (id: string, currentPaused: boolean) => {
-    if (!user) return;
+    
     try {
-      await dbService.updateTask(id, { isPaused: !currentPaused });
+      await storageService.updateTask(id, { isPaused: !currentPaused });
       fetchTasks();
     } catch (error) {
       if (isOffline) setToastError("Saved locally. Syncing when online.");
@@ -1455,7 +1329,7 @@ const Dashboard = () => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, effortLevel: nextValue } : t));
     
     try {
-      await dbService.updateTask(taskId, { effortLevel: nextValue });
+      await storageService.updateTask(taskId, { effortLevel: nextValue });
     } catch (err) {
       console.error(err);
     }
@@ -1476,7 +1350,7 @@ const Dashboard = () => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, priority: nextValue } : t));
     
     try {
-      await dbService.updateTask(taskId, { priority: nextValue });
+      await storageService.updateTask(taskId, { priority: nextValue });
     } catch (err) {
       console.error(err);
     }
@@ -1610,7 +1484,7 @@ const Dashboard = () => {
             onUpdateSubtask={async (newSubtasks) => {
               setTasks(prev => prev.map(t => t.id === task.id ? { ...t, subtasks: newSubtasks } : t));
               try {
-                await dbService.updateTask(task.id, { subtasks: newSubtasks });
+                await storageService.updateTask(task.id, { subtasks: newSubtasks });
               } catch (e) {
                 console.error("Failed to sync inline subtask update", e);
               }
@@ -1641,9 +1515,9 @@ const Dashboard = () => {
                    const intervals: ('daily' | 'weekly' | 'monthly' | 'yearly')[] = ['daily', 'weekly', 'monthly', 'yearly'];
                    const currentIndex = intervals.indexOf(task.recurrenceInterval as any);
                    const next = intervals[(currentIndex + 1) % intervals.length];
-                   if (!user) return;
+                   
                    try {
-                     await dbService.updateTask(task.id, { recurrenceInterval: next });
+                     await storageService.updateTask(task.id, { recurrenceInterval: next });
                      fetchTasks();
                    } catch (e) {
                      if (isOffline) setToastError("Saved locally. Syncing when online.");
@@ -1712,10 +1586,10 @@ const handlePullSubmit = async (e: React.KeyboardEvent<HTMLInputElement>) => {
       e.preventDefault();
       setIsSubmitting(true);
       
-      const firestoreId = dbService.getNewTaskId();
+      const firestoreId = storageService.getNewTaskId();
       const selectedCategory = activeTab === 'routines' ? 'household' : activeTab as 'life' | 'household' | 'inbox';
       const newTaskData: Omit<Task, 'id' | 'createdAt'> = {
-          userId: user!.uid,
+          
           title: pullInput.trim(),
           description: "",
           status: 'active',
@@ -1723,25 +1597,20 @@ const handlePullSubmit = async (e: React.KeyboardEvent<HTMLInputElement>) => {
           isRecurring: false,
           subtasks: [],
           priority: 'medium',
-          effortLevel: 'medium'
-      };
+          effortLevel: 'medium', completedAt: null };
 
       setTasks(prev => [{ id: firestoreId, ...newTaskData, createdAt: new Date().toISOString() } as Task, ...prev]);
       setPullInput("");
       setIsPullCapturing(false);
       setIsSubmitting(false);
 
-      if (isOffline) {
-        setSyncStatus('offline_saved');
-      } else {
-        setSyncStatus('syncing');
+      
+        
         try {
-          await dbService.saveTask(firestoreId, newTaskData);
-          setSyncStatus('synced');
+          await storageService.saveTask(firestoreId, newTaskData);
         } catch (error) {
           console.error("Failed to background sync pull task", error);
         }
-      }
     }
   };
 
@@ -1856,1005 +1725,92 @@ const handlePullSubmit = async (e: React.KeyboardEvent<HTMLInputElement>) => {
           <button onClick={() => setShowProfile(true)} className="p-2 text-muted hover:text-content transition-colors rounded-full hover:bg-outline/30" title="Settings">
             <SettingsIcon size={20} />
           </button>
-          <button 
-            onClick={() => { 
-              if (confirmLogout) {
-                if (Capacitor.isNativePlatform()) {
-                  GoogleAuth.signOut().catch(console.error).finally(() => {
-                    offlineLogout();
-                    auth.signOut();
-                  });
-                } else {
-                  offlineLogout();
-                  auth.signOut();
-                }
-              } else {
-                setConfirmLogout(true);
-                setTimeout(() => setConfirmLogout(false), 3000);
-              }
-            }} 
-            className={`p-2 transition-colors rounded-full hover:bg-outline/30 flex items-center gap-2 ${confirmLogout ? 'text-red-500 bg-red-500/10 hover:bg-red-500/20 px-4' : 'text-muted hover:text-content'}`}
-          >
-            <LogOut size={20} />
-            {confirmLogout && <span className="text-xs font-semibold uppercase tracking-wider">Confirm</span>}
-          </button>
         </div>
       </header>
 
-      {/* Low-Energy Mode Toggle */}
-      <div className="mb-8 flex items-center justify-between bg-[var(--card-bg)] border border-outline rounded-[20px] p-4 shadow-sm relative overflow-hidden group transition-colors">
-        {isLowEnergyMode && <div className="absolute inset-0 bg-yellow-500/5 mix-blend-overlay"></div>}
-        <div className="flex flex-col relative z-10">
-          <span className={`text-sm font-semibold flex items-center gap-2 transition-colors ${isLowEnergyMode ? 'text-yellow-600' : 'text-content'}`}>
-            <span className="text-lg">⚡</span> Low-Energy Mode
-          </span>
-          <span className="text-xs text-muted">Only show quick, easy tasks</span>
-        </div>
-        <button
-          onClick={() => setIsLowEnergyMode(!isLowEnergyMode)}
-          className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 z-10 ${isLowEnergyMode ? 'bg-yellow-500' : 'bg-outline'}`}
-        >
-          <span
-            className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${isLowEnergyMode ? 'translate-x-6' : 'translate-x-1 shadow-sm'}`}
-          />
-        </button>
+      <div className="flex gap-4 mb-6 sticky top-0 bg-base/80 backdrop-blur-sm z-10 py-2 border-b border-outline/10 overflow-x-auto no-scrollbar">
+        {(['inbox', 'life', 'household', 'routines'] as const).map(tab => (
+          <button 
+            key={tab} 
+            onClick={() => { setActiveTab(tab); document.documentElement.setAttribute('data-theme', tab === 'life' || tab === 'inbox' ? 'default' : tab); }} 
+            className={`font-medium pb-2 border-b-2 whitespace-nowrap transition-all ${activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-content'}`}
+          >
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
       </div>
 
-      <section className="mb-12">
-        <div className="flex justify-between items-center mb-3 px-1">
-          <div className="flex gap-2 overflow-x-auto no-scrollbar py-1 flex-1 mask-linear-right">
-            <button
-              onClick={() => setActiveTag(null)}
-              className={`flex-shrink-0 text-[10px] uppercase font-semibold px-3 py-1.5 rounded-full transition-colors border ${!activeTag ? 'bg-primary text-white border-primary' : 'bg-surface text-muted border-outline hover:border-primary/50'}`}
-            >
-              All
-            </button>
-            {uniqueTags.map(tag => (
-              <button
-                key={tag}
-                onClick={() => setActiveTag(tag)}
-                className={`flex-shrink-0 text-[10px] uppercase font-semibold px-3 py-1.5 rounded-full transition-colors border ${activeTag === tag ? 'bg-primary text-white border-primary' : 'bg-surface text-muted border-outline hover:border-primary/50'}`}
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-outline">
-            <select
-              value={sortOption}
-              onChange={(e) => setSortOption(e.target.value as 'date' | 'priority' | 'effort')}
-              className="text-xs font-medium text-primary bg-transparent outline-none cursor-pointer"
-            >
-              <option value="date" className="bg-surface text-content">Date</option>
-              <option value="priority" className="bg-surface text-content">Priority</option>
-              <option value="effort" className="bg-surface text-content">Energy Level</option>
-            </select>
-            <button 
-              onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-              className="text-xs font-medium text-primary flex items-center gap-1 hover:opacity-80 transition-opacity whitespace-nowrap"
-            >
-              {sortOrder === 'desc' ? <><ArrowDown size={14} /> {sortOption === 'date' ? 'Newest' : 'Highest'}</> : <><ArrowUp size={14} /> {sortOption === 'date' ? 'Oldest' : 'Lowest'}</>}
-            </button>
-          </div>
-        </div>
-        <div className="relative">
-          {isPullCapturing && (
-            <div className="w-full mb-4 z-10 relative">
-              <div className="flex items-center gap-2 bg-surface border border-primary/50 shadow-md rounded-[20px] p-2 pr-4">
-                <input 
-                  ref={pullRef}
-                  type="text" 
-                  value={pullInput}
-                  onChange={(e) => setPullInput(e.target.value)}
-                  onKeyDown={handlePullSubmit}
-                  placeholder={`Quick add to ${activeTab === 'life' ? 'Life Focus' : activeTab === 'inbox' ? 'Unsorted' : 'Household'}...`}
-                  className="flex-1 bg-transparent border-none outline-none text-content text-sm ml-2"
-                  autoFocus 
-                  disabled={isSubmitting}
-                />
-                <button onClick={() => setIsPullCapturing(false)} className="text-xs text-muted hover:text-red-500 font-medium">Cancel</button>
-              </div>
-            </div>
-          )}
+      <main className="flex-1 pb-32 no-scrollbar">
+        {renderTaskList()}
+      </main>
 
-          <motion.div
-            ref={listRef}
-            style={{ y: dragY }}
-            drag={canDrag && activeTab !== 'routines' ? "y" : false}
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={0.2}
-            onDragEnd={(_, info) => {
-              if (info.offset.y > 120 && activeTab !== 'routines') {
-                if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([50, 50]);
-                setIsPullCapturing(true);
-              }
-            }}
-            className="relative z-10 bg-[var(--bg-color)] min-h-[50vh]"
-          >
-            {renderTaskList()}
-          </motion.div>
-        </div>
-      </section>
-
-      <section className="pb-10">
-        {activeTab === 'routines' ? (
-          <button 
-            onClick={() => {
-               setRoutineTitle("");
-               setRoutineDescription("");
-               setRoutineTag("");
-               setNewSubtasks([]);
-               setNewSubtaskInput("");
-               setShowRoutineModal(true);
-            }}
-            className="w-full mb-4 shadow-sm flex items-center justify-center py-4 rounded-[20px] gap-2 border border-outline border-dashed hover:border-primary/50 transition-colors bg-surface text-muted hover:text-content font-medium text-sm"
-          >
-            <Plus size={18} />
-            <span>Add Routine Manually</span>
-          </button>
-        ) : (
-          <button 
-            onClick={() => {
-               setNewTaskTitle("");
-               setNewTaskDescription("");
-               setNewTaskTag("");
-               setNewTaskCategory(activeTab === 'routines' ? 'household' : (activeTab as 'life' | 'household' | 'inbox'));
-               setShowTaskModal(true);
-            }}
-            className={`w-full mb-4 flex items-center justify-center py-4 px-2 gap-2 transition-colors font-medium text-sm group rounded-[20px] shadow-sm border border-outline border-dashed ${
-              activeTab === 'life' ? 'text-blue-500 hover:bg-blue-500/5 hover:border-blue-500/30' : 
-              activeTab === 'inbox' ? 'text-indigo-500 hover:bg-indigo-500/5 hover:border-indigo-500/30' : 
-              'text-orange-500 hover:bg-orange-500/5 hover:border-orange-500/30'
-            }`}
-          >
-            <Plus size={20} className="transition-transform group-hover:scale-110" />
-            <span className="font-medium">Add Task</span>
-          </button>
-        )}
-        <div className="flex flex-row items-center justify-center gap-3 w-full mt-4 mb-6 relative z-20">
-          {activeTab !== 'inbox' ? (
-            <>
-              <button 
-                onClick={generateSuggestions} 
-                disabled={loadingSuggestions || !bio || bio === "{}" || isOffline}
-                className={`flex-1 h-10 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all duration-200 bg-primary/10 text-primary hover:bg-primary/20 ${isOffline ? 'opacity-50 cursor-not-allowed' : ''}`}
-                title="Anticipate For Me"
-              >
-                <Sparkles size={16} className={loadingSuggestions ? "animate-pulse" : ""} />
-                <span className="hidden sm:inline">{isOffline ? "Offline" : loadingSuggestions ? "Anticipating" : "Anticipate"}</span>
-              </button>
-              <button
-                onClick={handleSpinRoulette}
-                disabled={currentTasks.length === 0}
-                className={`flex-1 h-10 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all duration-200 bg-white/5 text-gray-300 hover:bg-white/10 border border-white/10 ${currentTasks.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                title="Pick For Me"
-              >
-                <span className="text-base leading-none">🎲</span> <span className="hidden sm:inline">{rouletteSelectedTaskId ? "Re-roll" : "Pick For Me"}</span>
-              </button>
-            </>
-          ) : (
-            <button 
-              onClick={handleSortForMe} 
-              disabled={isSorting || currentTasks.length === 0 || isOffline}
-              className={`flex-1 h-10 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all duration-200 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 ${(isOffline || currentTasks.length === 0) ? 'opacity-50 cursor-not-allowed' : ''}`}
-              title="Sort For Me"
-            >
-              <Sparkles size={16} className={isSorting ? "animate-pulse" : ""} />
-              <span className="hidden sm:inline">{isOffline ? "Offline" : isSorting ? "Sorting..." : "Sort For Me"}</span>
-            </button>
-          )}
-          
-          {clearAllConfirm ? (
-             <div className={`flex-1 h-10 flex items-center justify-center gap-2 bg-red-500/10 rounded-xl transition-all duration-200 ${isOffline || isClearing ? 'opacity-50 cursor-not-allowed' : ''}`}>
-               <button onClick={executeClearAllTasks} disabled={isClearing || isOffline} className="flex flex-1 items-center justify-center gap-1 text-sm font-medium text-red-500 hover:text-red-400 transition-colors" title="Confirm Clear"><Check size={16} /><span className="hidden sm:inline">Sure?</span></button>
-               <div className="w-[1px] h-4 bg-red-500/20"></div>
-               <button onClick={() => setClearAllConfirm(false)} className="flex flex-1 items-center justify-center text-muted hover:text-content transition-colors" title="Cancel"><X size={16} /></button>
-             </div>
-          ) : (
-            <button
-              onClick={() => setClearAllConfirm(true)}
-              disabled={isClearing || isOffline}
-              className={`flex-1 h-10 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all duration-200 bg-red-500/10 text-red-400 hover:bg-red-500/20 ${isOffline || isClearing ? 'opacity-50 cursor-not-allowed' : ''}`}
-              title="Clear all tasks in this tab"
-            >
-              <Trash2 size={16} />
-              <span className="hidden sm:inline">{isClearing ? "Clearing..." : "Clear All"}</span>
-            </button>
-          )}
-
-          {currentSuggestions.length > 0 && (
-            <button
-              onClick={() => setSuggestionCache(prev => ({ ...prev, [activeTab]: [] }))}
-              className="flex-[0.5] h-10 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all duration-200 bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 border border-white/10"
-              title="Clear suggestions"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
-        {loadingSuggestions && (
-           <div className="flex flex-col items-center mb-6 animate-in fade-in slide-in-from-top-2 duration-300">
-             {isTakingLong && (
-               <p className="text-xs text-gray-400 text-center mb-2 px-4">
-                 This is taking longer than usual. The AI might be under high demand or your connection is slow.
-               </p>
-             )}
-             <button
-               onClick={() => abortController?.abort()}
-               className="px-4 py-1.5 text-xs font-medium text-red-500 bg-red-500/10 hover:bg-red-500/20 border-transparent rounded-full transition-colors"
-             >
-               Cancel Request
-             </button>
-           </div>
-        )}
-
-        {(!bio || bio === "{}") && (
-          <div className="card-minimal bg-surface/50 border-dashed text-center py-8">
-            <p className="text-muted mb-4 font-light text-sm">Tell the AI about your life to enable proactive suggestions.</p>
-            <button onClick={() => setShowProfile(true)} className="btn-secondary text-xs uppercase tracking-widest px-4 py-2">Setup Context</button>
-          </div>
-        )}
-
-        <div className="grid gap-3">
-          {currentSuggestions.length > 0 && (
-            <div className="flex items-center justify-end px-2 pb-1">
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={sortAnticipatedByEffort}
-                  onChange={(e) => setSortAnticipatedByEffort(e.target.checked)}
-                  className="rounded text-primary border-outline focus:ring-primary/20 cursor-pointer w-3.5 h-3.5 transition-colors"
-                />
-                <span className="text-[11px] font-semibold text-muted group-hover:text-content uppercase tracking-wider transition-colors">Sort from easiest to hardest</span>
-              </label>
-            </div>
-          )}
-          <AnimatePresence>
-            {displayedAnticipatedTasks.map((suggestion, idx) => (
-              <motion.div
-                key={suggestion.title}
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ delay: idx * 0.05, duration: 0.3 }}
-                className="card-minimal border-outline bg-surface"
-              >
-                <div className="flex justify-between items-start mb-2 gap-2">
-                  <h4 className="font-medium text-[15px] leading-snug flex items-center gap-2 flex-wrap">
-                    {suggestion.isRecurring && <Repeat size={14} className="flex-shrink-0 text-muted/60" title={`Repeats ${suggestion.recurrenceInterval}`} />}
-                    {suggestion.title}
-                    {suggestion.tag && (
-                      <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                        {suggestion.tag}
-                      </span>
-                    )}
-                  </h4>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <button onClick={() => acceptSuggestion(suggestion)} title="Add to list" className="p-1.5 text-muted hover:text-success bg-surface shadow-sm rounded-full border border-outline transition-colors">
-                      <Check size={14} />
-                    </button>
-                    <button onClick={() => dismissSuggestion(suggestion.title)} title="Dismiss" className="p-1.5 text-muted hover:text-red-500 bg-surface shadow-sm rounded-full border border-outline transition-colors">
-                      <X size={14} />
-                    </button>
-                  </div>
-                </div>
-                <TaskDetails task={suggestion as any} isCompleting={false} />
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      </section>
-
-      {/* Routine Modal */}
-      <BottomSheet isOpen={showRoutineModal} onClose={() => setShowRoutineModal(false)}>
-        <h2 className="text-xl font-light mb-6">New Routine</h2>
-        
-        <form onSubmit={addRoutine} className="space-y-4">
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
-            <input
-              type="text"
-              required
-              value={routineTitle}
-              onChange={(e) => setRoutineTitle(e.target.value)}
-              placeholder="e.g. Water plants"
-              className="input-minimal w-full"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
-            <textarea
-              value={routineDescription}
-              onChange={(e) => setRoutineDescription(e.target.value)}
-              placeholder="Add details..."
-              className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
-            />
-          </div>
-          
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks (Checklist)</label>
-            {newSubtasks.length > 0 && (
-              <div className="mb-2 space-y-1">
-                {newSubtasks.map((st) => (
-                  <div key={st.id} className="flex justify-between items-center bg-[var(--card-bg)] px-3 py-2 rounded-xl border border-outline text-sm">
-                    <span className="truncate">{st.text}</span>
-                    {subtaskDeleteConfirmId === st.id ? (
-                      <div className="flex items-center gap-1 border border-red-500/20 bg-red-500/10 rounded-full px-1 py-1 shrink-0 ml-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewSubtasks(prev => prev.filter(s => s.id !== st.id));
-                            setSubtaskDeleteConfirmId(null);
-                          }}
-                          className="p-1 text-red-500 hover:bg-red-500/20 rounded-full transition-colors"
-                        >
-                          <Check size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSubtaskDeleteConfirmId(null)}
-                          className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setSubtaskDeleteConfirmId(st.id)}
-                        className="text-muted hover:text-red-500 transition-colors ml-2 shrink-0 bg-outline/20 p-1 rounded-full"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newSubtaskInput}
-                onChange={(e) => setNewSubtaskInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (newSubtaskInput.trim()) {
-                      setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
-                      setNewSubtaskInput("");
-                    }
-                  }
-                }}
-                placeholder="Add a sub-task..."
-                className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (newSubtaskInput.trim()) {
-                    setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
-                    setNewSubtaskInput("");
-                  }
-                }}
-                className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
-              >
-                Add
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Interval</label>
-              <select
-                value={routineInterval}
-                onChange={(e) => setRoutineInterval(e.target.value as any)}
-                className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
-              >
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-                <option value="yearly">Yearly</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Category</label>
-              <select
-                value={routineCategory}
-                onChange={(e) => setRoutineCategory(e.target.value as any)}
-                className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
-              >
-                <option value="life">Life Focus</option>
-                <option value="household">Household</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Tag (Optional)</label>
-            <input
-              type="text"
-              value={routineTag}
-              onChange={(e) => setRoutineTag(e.target.value)}
-              placeholder="e.g. garden"
-              className="input-minimal w-full"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
-            <select
-              value={routinePriority}
-              onChange={(e) => setRoutinePriority(e.target.value as any)}
-              className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </div>
-
-          <div className="pt-8">
-            <button 
-              type="submit" 
-              disabled={isSubmitting}
-              className={`w-full btn-primary py-4 rounded-[16px] shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-            >
-              {isSubmitting ? 'Saving...' : 'Save Routine'}
-            </button>
-          </div>
-        </form>
-      </BottomSheet>
-
-
-      {/* Task Modal */}
-      <BottomSheet isOpen={showTaskModal} onClose={() => setShowTaskModal(false)}>
-        <h2 className="text-xl font-light mb-6">New {activeTab === 'life' ? 'Life Focus' : activeTab === 'inbox' ? 'Unsorted' : 'Household'} Task</h2>
-        
-        <form onSubmit={addTask} className="space-y-4">
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
-            <input
-              ref={inputRef}
-              type="text"
-              required
-              value={newTaskTitle}
-              onChange={(e) => setNewTaskTitle(e.target.value)}
-              placeholder={activeTab === 'life' ? "e.g. Review UpToDate heart failure guidelines" : activeTab === 'inbox' ? "e.g. Brain dump..." : "e.g. Buy millet for Ziko"}
-              className="input-minimal w-full"
-            />
-          </div>
-          
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
-            <textarea
-              value={newTaskDescription}
-              onChange={(e) => setNewTaskDescription(e.target.value)}
-              placeholder="Add details..."
-              className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks</label>
-            <div className="space-y-2 mb-3">
-              {newSubtasks.map((subtask) => (
-                <div key={subtask.id} className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewSubtasks(prev => prev.map(s => s.id === subtask.id ? { ...s, isCompleted: !s.isCompleted } : s))}
-                    className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${subtask.isCompleted ? 'bg-primary border-primary text-background' : 'border-outline hover:border-muted text-transparent'}`}
-                  >
-                    <Check size={12} />
-                  </button>
-                  <span className={`text-sm flex-1 ${subtask.isCompleted ? 'line-through text-muted' : 'text-content'}`}>{subtask.text}</span>
-                  {subtaskDeleteConfirmId === subtask.id ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                           setNewSubtasks(prev => prev.filter(s => s.id !== subtask.id));
-                           setSubtaskDeleteConfirmId(null);
-                        }}
-                        className="p-1 text-red-400 hover:bg-red-400/10 rounded-full transition-colors"
-                      ><Check size={14} /></button>
-                      <button type="button" onClick={() => setSubtaskDeleteConfirmId(null)} className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"><X size={14} /></button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setSubtaskDeleteConfirmId(subtask.id)}
-                      className="p-1 text-muted hover:text-red-400 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newSubtaskInput}
-                onChange={(e) => setNewSubtaskInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (newSubtaskInput.trim()) {
-                      setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
-                      setNewSubtaskInput("");
-                    }
-                  }
-                }}
-                placeholder="Add a sub-task..."
-                className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (newSubtaskInput.trim()) {
-                    setNewSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: newSubtaskInput.trim(), isCompleted: false }]);
-                    setNewSubtaskInput("");
-                  }
-                }}
-                className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
-              >
-                Add
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Category</label>
-            <select
-              value={newTaskCategory}
-              onChange={(e) => setNewTaskCategory(e.target.value as any)}
-              className="input-minimal w-full appearance-none bg-[var(--card-bg)] text-sm cursor-pointer"
-            >
-              <option value="life">Life Focus</option>
-              <option value="household">Household & Shopping</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Tag (Optional)</label>
-            <input
-              type="text"
-              value={newTaskTag}
-              onChange={(e) => setNewTaskTag(e.target.value)}
-              placeholder={activeTab === 'life' ? "e.g. board prep" : activeTab === 'inbox' ? "e.g. thoughts" : "e.g. pet supplies"}
-              className="input-minimal w-full"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
-            <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
-              <button type="button" onClick={() => setNewTaskPriority('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Low</button>
-              <button type="button" onClick={() => setNewTaskPriority('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Medium</button>
-              <button type="button" onClick={() => setNewTaskPriority('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${newTaskPriority === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>High</button>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Effort Level</label>
-            <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
-              <button type="button" onClick={() => setNewTaskEffortLevel('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡</span> Low</button>
-              <button type="button" onClick={() => setNewTaskEffortLevel('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡</span> Medium</button>
-              <button type="button" onClick={() => setNewTaskEffortLevel('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${newTaskEffortLevel === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡⚡</span> High</button>
-            </div>
-          </div>
-
-          <div className="pt-8">
-            <button 
-              type="submit" 
-              disabled={isSubmitting}
-              className={`w-full btn-primary py-4 rounded-[16px] shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-            >
-              {isSubmitting ? 'Saving...' : 'Save Task'}
-            </button>
-          </div>
-        </form>
-      </BottomSheet>
-
-      {/* Edit Task Modal */}
-      <BottomSheet isOpen={showEditTaskModal && !!editingTask} onClose={() => setShowEditTaskModal(false)}>
-        <h2 className="text-xl font-light mb-6">Edit Task</h2>
-        
-        <form onSubmit={saveEditTask} className="space-y-4">
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Title</label>
-            <input
-              type="text"
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              placeholder="E.g., Renew insurance"
-              className="input-minimal w-full bg-[var(--card-bg)]"
-              autoFocus
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Description (Optional)</label>
-            <textarea
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              placeholder="Add details..."
-              className="input-minimal w-full min-h-[80px] resize-none bg-[var(--card-bg)] text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Sub-tasks</label>
-            <div className="space-y-2 mb-3">
-              {editSubtasks.map((subtask) => (
-                <div key={subtask.id} className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const updatedSubtasks = editSubtasks.map(s => s.id === subtask.id ? { ...s, isCompleted: !s.isCompleted } : s);
-                      setEditSubtasks(updatedSubtasks);
-                      if (editingTask) {
-                        setTasks(prev => prev.map(t => t.id === editingTask.id ? { ...t, subtasks: updatedSubtasks } : t));
-                        try {
-                          await dbService.updateTask(editingTask.id, { subtasks: updatedSubtasks });
-                        } catch (e) {
-                          console.error("Failed to sync subtask", e);
-                        }
-                      }
-                    }}
-                    className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${subtask.isCompleted ? 'bg-primary border-primary text-background' : 'border-outline hover:border-muted text-transparent'}`}
-                  >
-                    <Check size={12} />
-                  </button>
-                  <span className={`text-sm flex-1 ${subtask.isCompleted ? 'line-through text-muted' : 'text-content'}`}>{subtask.text}</span>
-                  {subtaskDeleteConfirmId === subtask.id ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                           setEditSubtasks(prev => prev.filter(s => s.id !== subtask.id));
-                           setSubtaskDeleteConfirmId(null);
-                        }}
-                        className="p-1 text-red-400 hover:bg-red-400/10 rounded-full transition-colors"
-                      ><Check size={14} /></button>
-                      <button type="button" onClick={() => setSubtaskDeleteConfirmId(null)} className="p-1 text-muted hover:bg-outline/20 rounded-full transition-colors"><X size={14} /></button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setSubtaskDeleteConfirmId(subtask.id)}
-                      className="p-1 text-muted hover:text-red-400 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={editSubtaskInput}
-                onChange={(e) => setEditSubtaskInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (editSubtaskInput.trim()) {
-                      setEditSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: editSubtaskInput.trim(), isCompleted: false }]);
-                      setEditSubtaskInput("");
-                    }
-                  }
-                }}
-                placeholder="Add a sub-task..."
-                className="input-minimal flex-1 text-sm bg-[var(--card-bg)]"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (editSubtaskInput.trim()) {
-                    setEditSubtasks(prev => [...prev, { id: 'st-' + Date.now(), text: editSubtaskInput.trim(), isCompleted: false }]);
-                    setEditSubtaskInput("");
-                  }
-                }}
-                className="px-3 bg-outline/20 hover:bg-outline/40 text-muted hover:text-content rounded-xl text-sm font-medium transition-colors"
-              >
-                Add
-              </button>
-              {!editSubtaskInput && (
-                <button
-                  type="button"
-                  onClick={handleDecomposeEdit}
-                  disabled={isDecomposingEdit}
-                  title="Break it down with AI"
-                  className={`px-3 flex items-center justify-center rounded-xl text-sm font-medium transition-colors ${isDecomposingEdit ? 'bg-primary/20 text-primary opacity-70 cursor-not-allowed' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
-                >
-                  <Sparkles size={16} className={isDecomposingEdit ? "animate-pulse" : ""} />
-                </button>
-              )}
-              {backupSubtasksEdit && !editSubtaskInput && (
-                <button
-                  type="button"
-                  onClick={handleRevertEdit}
-                  title="Revert AI Breakdown"
-                  className="px-2 flex items-center justify-center bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-colors"
-                >
-                  <CornerUpLeft size={16} />
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Context</label>
-            <div className="flex bg-[var(--card-bg)] rounded-full p-1 border border-outline mt-2">
-              <button
-                type="button"
-                onClick={() => setEditCategory('life')}
-                className={`flex-1 py-1.5 px-3 rounded-full text-xs font-semibold transition-all ${editCategory === 'life' ? 'bg-primary text-surface shadow-sm' : 'text-muted hover:text-content'}`}
-              >
-                Life
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditCategory('household')}
-                className={`flex-1 py-1.5 px-3 rounded-full text-xs font-semibold transition-all ${editCategory === 'household' ? 'bg-primary text-surface shadow-sm' : 'text-muted hover:text-content'}`}
-              >
-                Household
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Priority</label>
-            <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
-              <button type="button" onClick={() => setEditPriority('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Low</button>
-              <button type="button" onClick={() => setEditPriority('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>Medium</button>
-              <button type="button" onClick={() => setEditPriority('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${editPriority === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}>High</button>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted ml-1 mb-1 block">Effort Level</label>
-            <div className="flex bg-[var(--card-bg)] rounded-xl p-1 gap-1 border border-outline">
-              <button type="button" onClick={() => setEditEffortLevel('low')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'low' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡</span> Low</button>
-              <button type="button" onClick={() => setEditEffortLevel('medium')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'medium' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡</span> Medium</button>
-              <button type="button" onClick={() => setEditEffortLevel('high')} className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 ${editEffortLevel === 'high' ? 'bg-background shadow-sm text-content' : 'text-muted hover:text-content'}`}><span className="text-yellow-500 text-[10px]">⚡⚡⚡</span> High</button>
-            </div>
-          </div>
-
-          <div className="pt-8 flex flex-col gap-2">
-            <button 
-              type="submit" 
-              disabled={isSubmitting}
-              className={`w-full btn-primary py-4 rounded-[16px] shadow-sm text-sm font-medium transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-            >
-              {isSubmitting ? 'Saving...' : 'Save Changes'}
-            </button>
-            <button 
-              type="button" 
-              onClick={deleteExistingTask} 
-              disabled={isSubmitting}
-              className={`w-full bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/40 py-4 rounded-[16px] shadow-sm text-sm font-medium transition-colors ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-            >
-              {isSubmitting ? 'Deleting...' : confirmDelete ? 'Tap again to confirm delete' : 'Delete Task'}
-            </button>
-          </div>
-        </form>
-      </BottomSheet>
-
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 border-t border-outline pb-safe z-40 transition-colors duration-400 ease-in-out" style={{ backgroundColor: 'var(--nav-bg)', backdropFilter: 'blur(12px)' }}>
-        <div className="flex max-w-md mx-auto relative px-2 py-2">
-          <button
-            onClick={() => { setActiveTab('inbox'); setActiveTag(null); }}
-            className={`flex-1 flex flex-col items-center py-1 text-xs font-medium transition-colors ${activeTab === 'inbox' ? 'text-primary' : 'text-muted hover:text-content'}`}
-          >
-            <CircularProgressIcon icon={Inbox} isActive={activeTab === 'inbox'} hasIndicator={inboxActiveCount > 0} />
-            <span className="truncate">Unsorted</span>
-          </button>
-          <button
-            onClick={() => { setActiveTab('life'); setActiveTag(null); }}
-            className={`flex-1 flex flex-col items-center py-1 text-xs font-medium transition-colors ${activeTab === 'life' ? 'text-primary' : 'text-muted hover:text-content'}`}
-          >
-            <CircularProgressIcon icon={UserTab} isActive={activeTab === 'life'} percentage={lifePercentage} />
-            <span>Life</span>
-          </button>
-          <button
-            onClick={() => { setActiveTab('household'); setActiveTag(null); }}
-             className={`flex-1 flex flex-col items-center py-1 text-xs font-medium transition-colors ${activeTab === 'household' ? 'text-primary' : 'text-muted hover:text-content'}`}
-          >
-            <CircularProgressIcon icon={Home} isActive={activeTab === 'household'} percentage={householdPercentage} />
-            <span className="truncate">Home</span>
-          </button>
-          <button
-            onClick={() => { setActiveTab('routines'); setActiveTag(null); }}
-            className={`flex-1 flex flex-col items-center py-1 text-xs font-medium transition-colors ${activeTab === 'routines' ? 'text-primary' : 'text-muted hover:text-content'}`}
-          >
-            <CircularProgressIcon icon={Repeat} isActive={activeTab === 'routines'} percentage={routinesPercentage} />
-            <span className="truncate">Routines</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Floating Action Button (FAB) */}
+      {/* Quick Add FAB */}
       <button 
         onClick={() => setShowQuickCapture(true)}
-        className="fixed bottom-24 right-6 w-14 h-14 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-[0_8px_30px_rgb(99,102,241,0.4)] z-40 transition-transform hover:scale-105 active:scale-95"
+        className="fixed bottom-8 right-8 w-14 h-14 bg-primary text-primary-content rounded-full shadow-lg shadow-black/20 flex items-center justify-center hover:scale-105 active:scale-95 transition-all z-40"
       >
-        <Plus size={28} className="stroke-[2.5]" />
+        <Plus size={28} strokeWidth={2} />
       </button>
 
-      {/* Quick Capture Modal */}
-      <BottomSheet isOpen={showQuickCapture} onClose={() => setShowQuickCapture(false)}>
-        <form onSubmit={handleQuickCapture} className="flex flex-col gap-4">
-          <input
-            ref={quickInputRef}
-            type="text"
-            value={quickCaptureInput}
-            onChange={e => setQuickCaptureInput(e.target.value)}
-            className="w-full bg-transparent border-none text-2xl outline-none placeholder:text-muted/50 font-light mb-4"
-            placeholder="Brain dump..."
-          />
-          <div className="flex justify-end">
-             <button type="submit" className="px-6 py-3 rounded-full bg-indigo-500 text-white shadow-lg hover:bg-indigo-600 transition-colors font-medium text-sm flex items-center justify-center min-w-[120px]" disabled={!quickCaptureInput.trim() || isSubmitting}>
-               {isSubmitting ? 'Saving...' : 'Add Task'}
-             </button>
-          </div>
-        </form>
-      </BottomSheet>
-
-      {/* Error Toast */}
+      {/* Quick Capture Overlay */}
       <AnimatePresence>
-        {toastError && (
-          <motion.div
+        {showQuickCapture && (
+          <motion.div 
             initial={{ opacity: 0, y: 50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-24 left-4 right-4 max-w-sm mx-auto bg-red-50 text-red-600 px-4 py-3 rounded-2xl shadow-sm border border-red-100 flex items-center justify-between text-sm z-50 overflow-hidden"
+            exit={{ opacity: 0, y: 50, scale: 0.95 }}
+            className="fixed bottom-8 left-4 right-24 bg-surface border border-outline/20 p-2 rounded-2xl shadow-xl z-50 flex items-center gap-2"
           >
-            <span className="font-light pr-2">{toastError}</span>
-            <button 
-              onClick={() => setToastError(null)} 
-              className="p-1.5 hover:bg-red-100 bg-red-50/50 rounded-full transition-colors flex-shrink-0"
-            >
-              <X size={14} />
+            <input 
+              autoFocus
+              type="text" 
+              value={quickCaptureInput}
+              onChange={e => setQuickCaptureInput(e.target.value)}
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter' && quickCaptureInput.trim()) {
+                  const newTask = await storageService.saveTask(storageService.getNewTaskId(), {
+                    title: quickCaptureInput.trim(),
+                    description: "",
+                    status: 'active',
+                    category: activeTab === 'routines' ? 'life' : activeTab,
+                    isRecurring: false,
+                    subtasks: [],
+                    priority: 'medium',
+                    effortLevel: 'medium', completedAt: null });
+                  setTasks(prev => [newTask, ...prev]);
+                  setQuickCaptureInput("");
+                  setShowQuickCapture(false);
+                }
+              }}
+              placeholder="What's happening?" 
+              className="flex-1 bg-transparent border-none outline-none text-content placeholder:text-muted/50 px-4 py-2"
+            />
+            <button onClick={() => setShowQuickCapture(false)} className="p-2 text-muted hover:text-content rounded-full hover:bg-outline/20">
+              <X size={20} />
             </button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <FocusIsland
-        activeFocusTask={activeFocusTask}
-        rouletteTask={rouletteSelectedTaskId ? { id: rouletteSelectedTaskId, title: tasks.find(t => t.id === rouletteSelectedTaskId)?.title || 'Selected Task' } : null}
-        onClearFocus={() => setActiveFocusTask(null)}
-        onClearRoulette={() => setRouletteSelectedTaskId(null)}
-        onCompleteFocus={async (taskId, subtaskId) => {
-          const task = tasks.find(t => t.id === taskId);
-          if (task && task.subtasks && subtaskId) {
-            const updatedSubtasks = task.subtasks.map((s, sIdx) => 
-              ((s.id || sIdx.toString()) === subtaskId) ? { ...s, isCompleted: true } : s
-            );
-            setTasks(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: updatedSubtasks } : t));
-            setActiveFocusTask(null);
-            try {
-              await dbService.updateTask(taskId, { subtasks: updatedSubtasks });
-            } catch (error) {
-              console.error("Failed to mark subtask complete", error);
-            }
-          } else {
-            setActiveFocusTask(null);
-          }
-        }}
-        onCompleteRoulette={(taskId) => {
-           completeTask(taskId);
-        }}
-      />
-
+      {/* Toast Notification */}
       <AnimatePresence>
-        {confirmResetApp && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface border border-red-500/20 max-w-sm w-full rounded-2xl p-6 shadow-2xl relative overflow-hidden"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
-              <div className="flex justify-center mb-4">
-                <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center">
-                  <AlertTriangle size={24} className="text-red-500" />
-                </div>
-              </div>
-              <h2 className="text-xl font-medium text-center mb-2">Reset All Data?</h2>
-              <p className="text-muted text-sm text-center mb-6 leading-relaxed">
-                Are you absolutely sure you want to permanently delete ALL data? This will wipe your entire history and cannot be undone.
-              </p>
-              
-              <div className="mb-6">
-                <label className="block text-xs uppercase tracking-wider font-semibold text-muted mb-2 text-center">
-                  Type <span className="text-red-500 select-all">RESET</span> to confirm
-                </label>
-                <input
-                  type="text"
-                  value={resetChallengeInput}
-                  onChange={(e) => setResetChallengeInput(e.target.value)}
-                  className="input-minimal w-full text-center text-lg uppercase tracking-widest font-mono border-red-500/30 focus:border-red-500/70 py-4"
-                  placeholder="RESET"
-                  disabled={isResetting}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="characters"
-                />
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  disabled={isResetting}
-                  onClick={() => {
-                    setConfirmResetApp(false);
-                    setResetChallengeInput("");
-                  }}
-                  className="flex-1 px-4 py-2.5 rounded-[20px] text-muted hover:text-content font-medium transition-colors border border-outline hover:bg-outline/20 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (resetChallengeInput.toUpperCase() !== "RESET" || !user) return;
-                    setIsResetting(true);
-                    try {
-                      // Fetch all completed items to ensure thorough wipe
-                      const allHistoryTasks = await dbService.getTasks(user.uid, 'completed');
-                      const activeTasksToDelete = tasks;
-                      const allTaskIds = [...activeTasksToDelete.map(t => t.id), ...allHistoryTasks.map(t => t.id)];
-                      // Delete from database
-                      await dbService.clearTasks(allTaskIds);
-                      // Reset local app level state
-                      setTasks([]);
-                      setConfirmResetApp(false);
-                      setResetChallengeInput("");
-                    } catch (e) {
-                      setToastError("Failed to reset database.");
-                    } finally {
-                      setIsResetting(false);
-                    }
-                  }}
-                  disabled={resetChallengeInput.toUpperCase() !== "RESET" || isResetting}
-                  className="flex-1 px-4 py-2.5 rounded-[20px] bg-red-500 hover:bg-red-600 text-white font-medium transition-colors disabled:opacity-50 disabled:bg-surface disabled:text-muted disabled:border disabled:border-outline flex justify-center items-center gap-2"
-                >
-                  {isResetting ? <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "Delete All"}
-                </button>
-              </div>
-            </motion.div>
-          </div>
+        {toastError && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-2 rounded-xl text-sm font-medium z-50 flex items-center justify-center gap-2"
+          >
+            <AlertTriangle size={16} />
+             {toastError}
+          </motion.div>
         )}
       </AnimatePresence>
 
     </div>
   );
-};
-
-const Main = () => {
-  const { user, loading } = useAuth();
-
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center">
-      <Sparkles className="animate-pulse text-gray-200" size={48} />
-    </div>
-  );
-
-  return user ? <Dashboard /> : <Login />;
 };
 
 export default function App() {
-  return (
-    <AuthProvider>
-      <Main />
-    </AuthProvider>
-  );
+  return <Dashboard />;
 }

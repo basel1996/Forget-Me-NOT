@@ -2,8 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Trophy, Activity, Loader2 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { dbService } from '../lib/dbService';
-import { useAuth } from './AuthProvider';
+import { storageService } from '../lib/storageService';
 
 interface Task {
   id: string;
@@ -25,15 +24,15 @@ const CATEGORY_COLORS = {
 };
 
 export function WeeklyWinsDashboard({ onClose }: WeeklyWinsProps) {
-  const { user } = useAuth();
+  
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+    
     const loadWins = async () => {
       try {
-        const completedTasks = await dbService.getTasks(user.uid, 'completed');
+        const completedTasks = await storageService.getTasks('completed');
         setTasks(completedTasks as Task[]);
       } catch (err) {
         console.error("Failed to fetch completed tasks:", err);
@@ -42,7 +41,7 @@ export function WeeklyWinsDashboard({ onClose }: WeeklyWinsProps) {
       }
     };
     loadWins();
-  }, [user]);
+  }, []);
 
   const { chartData, groupedWins, totalWins } = useMemo(() => {
     const oneWeekAgo = new Date();
