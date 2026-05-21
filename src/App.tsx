@@ -14,12 +14,19 @@ import { useCircadian } from "./hooks/useCircadian";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
 import { SyncIndicator } from "./components/SyncIndicator";
 
+import { Capacitor } from '@capacitor/core';
 // Initialize the plugin
-GoogleAuth.initialize({
-  clientId: 'PASTE_YOUR_WEB_CLIENT_ID_HERE',
-  scopes: ['profile', 'email'],
-  grantOfflineAccess: true,
-});
+try {
+  if (Capacitor.isNativePlatform()) {
+    GoogleAuth.initialize({
+      clientId: 'PASTE_YOUR_WEB_CLIENT_ID_HERE',
+      scopes: ['profile', 'email'],
+      grantOfflineAccess: true,
+    });
+  }
+} catch (e) {
+  console.error("Failed to initialize GoogleAuth", e);
+}
 
 interface Task {
   id: string;
@@ -60,19 +67,22 @@ const Login = () => {
 
   const handleLogin = async () => {
     try {
-      // 1. Trigger the native Android Google login prompt
-      const googleUser = await GoogleAuth.signIn();
+      if (Capacitor.isNativePlatform()) {
+        // 1. Trigger the native Android Google login prompt
+        const googleUser = await GoogleAuth.signIn();
 
-      // 2. Take the secure token Android gives us and hand it to Firebase
-      const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+        // 2. Take the secure token Android gives us and hand it to Firebase
+        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
 
-      // 3. Log into Firebase securely!
-      await signInWithCredential(auth, credential);
-      
-      console.log("Successfully logged in on mobile!");
-
+        // 3. Log into Firebase securely!
+        await signInWithCredential(auth, credential);
+        
+        console.log("Successfully logged in on mobile!");
+      } else {
+        await signInWithPopup();
+      }
     } catch (error) {
-      console.error("Mobile login failed:", error);
+      console.error("Login failed:", error);
     }
   };
 
@@ -1662,7 +1672,13 @@ const handlePullSubmit = async (e: React.KeyboardEvent<HTMLInputElement>) => {
           <button 
             onClick={() => { 
               if (confirmLogout) {
-                auth.signOut();
+                if (Capacitor.isNativePlatform()) {
+                  GoogleAuth.signOut().catch(console.error).finally(() => {
+                    auth.signOut();
+                  });
+                } else {
+                  auth.signOut();
+                }
               } else {
                 setConfirmLogout(true);
                 setTimeout(() => setConfirmLogout(false), 3000);
