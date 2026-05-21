@@ -4,7 +4,7 @@ import { auth, googleProvider, signInWithPopup } from "./lib/firebase";
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { dbService } from "./lib/dbService";
-import { LogIn, User as UserIcon, Plus, Check, X, Sparkles, LogOut, Settings as SettingsIcon, ArrowLeft, Home, User as UserTab, ArrowDown, ArrowUp, Repeat, RotateCcw, Archive, Trash2, Inbox, Play, Trophy, Activity, AlertTriangle, CornerUpLeft, Coffee, Wind, Leaf, Moon, Cloud, Feather, Sun, Mountain, Compass, Waves } from "lucide-react";
+import { LogIn, User as UserIcon, Plus, Check, X, Sparkles, LogOut, Settings as SettingsIcon, ArrowLeft, Home, User as UserTab, ArrowDown, ArrowUp, Repeat, RotateCcw, Archive, Trash2, Inbox, Play, Trophy, Activity, AlertTriangle, CornerUpLeft, Coffee, Wind, Leaf, Moon, Cloud, Feather, Sun, Mountain, Compass, Waves, Download, UploadCloud } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform } from "motion/react";
 import { HistoryView } from "./HistoryView";
 import { FocusIsland } from "./components/FocusIsland";
@@ -476,6 +476,45 @@ const Dashboard = () => {
   const [bio, setBio] = useState("");
   const [rawProfileText, setRawProfileText] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+  
+  // Backup / local data
+  const [showImportWarning, setShowImportWarning] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Sync Data
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Initial load
+    setHasUnsyncedChanges(localStorage.getItem('has_unsynced_changes') === 'true');
+    setLastSyncedAt(localStorage.getItem(`fmn_last_synced_${user?.uid}`) || null);
+    
+    const handleLocalTasksUpdate = () => {
+      setHasUnsyncedChanges(localStorage.getItem('has_unsynced_changes') === 'true');
+      setLastSyncedAt(localStorage.getItem(`fmn_last_synced_${user?.uid}`) || null);
+    };
+    
+    window.addEventListener('local_tasks_updated', handleLocalTasksUpdate);
+    return () => window.removeEventListener('local_tasks_updated', handleLocalTasksUpdate);
+  }, [user]);
+
+  const handleManualSync = async () => {
+    if (!user) return;
+    setIsSyncing(true);
+    try {
+      await dbService.syncWithCloud(user.uid);
+      setToastError("Sync successful!"); // This will show a standard toast text
+    } catch (error) {
+      console.error(error);
+      setToastError("Sync failed. Check connection.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [showTaskModal, setShowTaskModal] = useState(false);
@@ -1130,6 +1169,84 @@ const Dashboard = () => {
     }));
   };
 
+  const exportData = async () => {
+    if (!user) return;
+    try {
+      const allTasks = await dbService.getTasks(user.uid);
+      const backup = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        tasks: allTasks,
+        bio: bio
+      };
+      const dataStr = JSON.stringify(backup, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const dateStr = new Date().toISOString().split('T')[0];
+      a.download = `forget-me-not-backup-${dateStr}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setToastError("Backup downloaded successfully!");
+      setTimeout(() => setToastError(null), 3000);
+    } catch (e) {
+      console.error("Backup failed", e);
+      setToastError("Failed to export backup.");
+    }
+  };
+
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setImportFile(e.target.files[0]);
+      setShowImportWarning(true);
+    }
+  };
+
+  const executeImport = () => {
+    if (!importFile || !user) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const backup = JSON.parse(content);
+        if (!backup.tasks) throw new Error("Invalid backup file: Missing tasks array");
+        
+        const currentTasks = await dbService.getTasks(user.uid);
+        if (currentTasks.length > 0) {
+          await dbService.clearTasks(currentTasks.map(t => t.id));
+        }
+        
+        const importedTasks = backup.tasks.map((t: any) => ({
+          ...t,
+          userId: user.uid
+        }));
+        
+        await dbService.importTasksBatch(importedTasks);
+        
+        if (backup.bio && typeof backup.bio === 'string') {
+          await dbService.saveProfile(user.uid, backup.bio);
+          setBio(backup.bio);
+        }
+        
+        setTasks(importedTasks.filter((t: Task) => !t.completedAt || new Date(t.completedAt).getTime() > Date.now() - 24 * 60 * 60 * 1000));
+        
+        setToastError("Restore complete!");
+        setTimeout(() => setToastError(null), 3000);
+      } catch (err) {
+        console.error("Import failed", err);
+        setToastError("Import failed. Invalid file.");
+      } finally {
+        setShowImportWarning(false);
+        setImportFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    };
+    reader.readAsText(importFile);
+  };
+
   const processAndSaveProfile = async () => {
     if (!user || !rawProfileText.trim()) return;
     if (isOffline) {
@@ -1203,6 +1320,56 @@ const Dashboard = () => {
           {savingProfile ? "Thinking..." : "Process & Save Profile"}
         </button>
         
+        <div className="mt-12 pt-8 border-t border-outline/10">
+          <h3 className="font-medium mb-2">Data Ownership</h3>
+          <p className="text-muted text-sm mb-6 font-light">
+            Fully back up your entire app state, or securely restore an existing backup.
+          </p>
+          <div className="flex flex-col gap-3">
+            <button onClick={exportData} className="flex justify-center items-center gap-2 w-full p-4 rounded-xl border border-outline/20 bg-surface hover:bg-surface-active transition-colors text-sm font-medium">
+              <Download size={18} className="text-primary" />
+              Download Local Backup
+            </button>
+            <button onClick={() => fileInputRef.current?.click()} className="flex justify-center items-center gap-2 w-full p-4 rounded-xl text-muted hover:text-content transition-colors text-sm font-medium">
+              <UploadCloud size={18} />
+              Restore from Backup
+            </button>
+            <input 
+              type="file" 
+              accept=".json" 
+              ref={fileInputRef} 
+              onChange={handleImportFileChange}
+              className="hidden" 
+            />
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {showImportWarning && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-base/80 backdrop-blur-sm"
+            >
+              <div className="bg-surface border border-outline/20 p-6 rounded-2xl w-full max-w-sm">
+                <h3 className="text-xl font-light mb-2">Restore Backup?</h3>
+                <p className="text-muted mb-6 text-sm">
+                  This will completely overwrite your current dashboard data with the contents of the backup file. This action cannot be undone.
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button onClick={executeImport} className="btn-primary w-full text-center">
+                    Yes, Restore Backup
+                  </button>
+                  <button onClick={() => { setShowImportWarning(false); setImportFile(null); if(fileInputRef.current) fileInputRef.current.value = ""; }} className="p-3 w-full rounded-xl text-muted hover:text-content text-center font-medium transition-colors">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="mt-16 pt-8 border-t border-red-500/10">
           <h3 className="text-red-500 font-medium mb-4 flex items-center gap-2">
             <AlertTriangle size={18} /> Danger Zone
@@ -1659,7 +1826,6 @@ const handlePullSubmit = async (e: React.KeyboardEvent<HTMLInputElement>) => {
 
   return (
     <div className={`distraction-free relative min-h-screen transition-colors duration-1000 ${phase === 'night' ? 'night-theme-override' : ''}`}>
-      <SyncIndicator status={syncStatus} />
       <header className="flex justify-between items-center mb-6 pt-4">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-light tracking-tight transition-colors duration-1000">
@@ -1669,7 +1835,18 @@ const handlePullSubmit = async (e: React.KeyboardEvent<HTMLInputElement>) => {
             {phase === 'night' && "Time to wind down."}
           </h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <div className="relative group flex items-center">
+            <button onClick={handleManualSync} disabled={isSyncing} className="p-2 text-muted hover:text-content transition-colors rounded-full hover:bg-outline/30 flex items-center gap-2" title="Push to Cloud">
+              {isSyncing ? <Repeat size={20} className="animate-spin text-primary" /> : <Cloud size={20} />}
+              {hasUnsyncedChanges && !isSyncing && <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-orange-500 rounded-full border-2 border-base"></span>}
+            </button>
+            <div className="hidden group-hover:flex absolute top-full right-0 mt-2 bg-surface border border-outline rounded-lg p-3 text-xs text-muted shadow-lg flex-col whitespace-nowrap z-50">
+              <span className="font-semibold text-content mb-1">Local-First Sync</span>
+              {hasUnsyncedChanges ? <span className="text-orange-400">Unsynced changes</span> : <span className="text-green-500">All changes synced</span>}
+              <span className="mt-1 opacity-70">Last synced: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : 'Never'}</span>
+            </div>
+          </div>
           <button onClick={() => setShowHistory(true)} className="p-2 text-muted hover:text-content transition-colors rounded-full hover:bg-outline/30" title="History">
             <Archive size={20} />
           </button>

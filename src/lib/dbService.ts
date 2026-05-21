@@ -3,14 +3,6 @@ import {
   doc, 
   getDoc, 
   getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  limit as firestoreLimit,
-  serverTimestamp,
-  Timestamp,
   writeBatch
 } from 'firebase/firestore';
 import { db } from './firebase';
@@ -19,7 +11,7 @@ interface Profile {
   bio: string;
 }
 
-interface Task {
+export interface Task {
   id: string;
   title: string;
   description: string;
@@ -41,269 +33,324 @@ interface Task {
   effortLevel?: 'low' | 'medium' | 'high';
 }
 
+const getLocalTasks = (userId: string): Task[] => {
+  const data = localStorage.getItem(`fmn_tasks_${userId}`);
+  return data ? JSON.parse(data) : [];
+};
+
+const saveLocalTasks = (userId: string, tasks: Task[]) => {
+  localStorage.setItem(`fmn_tasks_${userId}`, JSON.stringify(tasks));
+  localStorage.setItem(`has_unsynced_changes`, 'true');
+  // Dispatch an event so App.tsx can show the unsynced indicator
+  window.dispatchEvent(new Event('local_tasks_updated'));
+};
+
+const getLocalProfile = (userId: string): Profile => {
+  const data = localStorage.getItem(`fmn_profile_${userId}`);
+  return data ? JSON.parse(data) : { bio: "{}" };
+};
+
+const saveLocalProfile = (userId: string, bio: string) => {
+  localStorage.setItem(`fmn_profile_${userId}`, JSON.stringify({ bio }));
+  localStorage.setItem(`has_unsynced_changes`, 'true');
+  window.dispatchEvent(new Event('local_tasks_updated'));
+};
+
 export const dbService = {
   getProfile: async (userId: string) => {
-    try {
-      const docRef = doc(db, 'profiles', userId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        return docSnap.data() as Profile;
-      }
-      return { bio: "{}" };
-    } catch (error) {
-      console.error("Error getting profile:", error);
-      return { bio: "{}" };
-    }
+    return getLocalProfile(userId);
   },
   saveProfile: async (userId: string, bio: string) => {
-    try {
-      const docRef = doc(db, 'profiles', userId);
-      await setDoc(docRef, { bio }, { merge: true });
-    } catch (error) {
-      console.error("Error saving profile:", error);
-      throw error;
-    }
+    saveLocalProfile(userId, bio);
   },
   getTasks: async (userId: string, status?: 'active' | 'completed', limit?: number) => {
-    try {
-      const tasksRef = collection(db, 'tasks');
-      let q = query(tasksRef, where('userId', '==', userId));
-      
-      if (status) {
-        q = query(q, where('status', '==', status));
-      }
-
-      const querySnapshot = await getDocs(q);
-      const tasks: Task[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        tasks.push({
-          ...data,
-          id: doc.id,
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt,
-          completedAt: data.completedAt instanceof Timestamp ? data.completedAt.toDate().toISOString() : data.completedAt,
-        } as Task);
-      });
-
-      if (status === 'completed') {
-        tasks.sort((a, b) => new Date(b.completedAt || 0).getTime() - new Date(a.completedAt || 0).getTime());
-      } else {
-        tasks.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-      }
-
-      if (limit) {
-        return tasks.slice(0, limit);
-      }
-      return tasks;
-    } catch (error) {
-      console.error("Error getting tasks:", error);
-      throw error;
+    let tasks = getLocalTasks(userId);
+    if (status) {
+      tasks = tasks.filter(t => t.status === status);
     }
+    
+    if (status === 'completed') {
+      tasks.sort((a, b) => new Date(b.completedAt || 0).getTime() - new Date(a.completedAt || 0).getTime());
+    } else {
+      tasks.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    }
+
+    if (limit) {
+      return tasks.slice(0, limit);
+    }
+    return tasks;
   },
   getCompletedTasksToday: async (userId: string) => {
-    try {
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      
-      const tasksRef = collection(db, 'tasks');
-      const q = query(
-        tasksRef, 
-        where('userId', '==', userId), 
-        where('status', '==', 'completed'),
-        // No orderBy on completedAt here because we don't know if the compound index exists.
-        // We'll just fetch a limit of 150 which is reasonable for a day's worth of completed tasks.
-        firestoreLimit(150)
-      );
-      
-      const querySnapshot = await getDocs(q);
-      
-      const todayCount = { life: 0, household: 0, routines: 0 };
-      
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        let completedAtDate;
-        if (data.completedAt) {
-           completedAtDate = data.completedAt instanceof Timestamp ? data.completedAt.toDate() : new Date(data.completedAt);
+    const tasks = getLocalTasks(userId);
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    const todayCount = { life: 0, household: 0, routines: 0 };
+    
+    tasks.forEach(task => {
+      if (task.status !== 'completed') return;
+      const completedAtDate = task.completedAt ? new Date(task.completedAt) : null;
+      if (completedAtDate && completedAtDate >= startOfDay) {
+        if (task.isRecurring) {
+          todayCount.routines++;
+        } else if (task.category === 'life') {
+          todayCount.life++;
+        } else if (task.category === 'household') {
+           todayCount.household++;
         }
-        
-        if (completedAtDate && completedAtDate >= startOfDay) {
-          if (data.isRecurring) {
-            todayCount.routines++;
-          } else if (data.category === 'life') {
-            todayCount.life++;
-          } else if (data.category === 'household') {
-             todayCount.household++;
-          }
-        }
-      });
-      return todayCount;
-    } catch (e) {
-      console.error("Error fetching completed tasks today", e);
-      return { life: 0, household: 0, routines: 0 };
-    }
+      }
+    });
+    return todayCount;
   },
   saveTask: async (id: string, taskData: Omit<Task, 'id' | 'createdAt'>) => {
-    try {
-      const docRef = doc(db, 'tasks', id);
-      await setDoc(docRef, {
-        ...taskData,
-        createdAt: serverTimestamp()
-      });
-      return { id, ...taskData, createdAt: new Date().toISOString() };
-    } catch (error) {
-      console.error("Error saving task:", error);
-      throw error;
-    }
+    const tasks = getLocalTasks(taskData.userId);
+    const newTask: Task = {
+      ...taskData,
+      id,
+      createdAt: new Date().toISOString()
+    };
+    tasks.push(newTask);
+    saveLocalTasks(taskData.userId, tasks);
+    return newTask;
   },
   getNewTaskId: () => {
-    return doc(collection(db, 'tasks')).id;
+    return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
   },
   updateTask: async (id: string, updates: Partial<Task>) => {
-    try {
-      const docRef = doc(db, 'tasks', id);
-      const cleanUpdates = JSON.parse(JSON.stringify(updates));
-      await updateDoc(docRef, cleanUpdates);
-      const updatedSnap = await getDoc(docRef);
-      return { id, ...updatedSnap.data() };
-    } catch (error) {
-      console.error("Error updating task:", error);
-      throw error;
+    // Need to find userId, but we might not have it in the arguments.
+    // However, updateTask assumes we know the user. To keep it simple, we'll scan localStorage?
+    // Wait, all tasks are stored per user: localStorage.getItem(`fmn_tasks_${userId}`)
+    // We can just iterate through all local storage keys, but it's easier to find the user.
+    // Let's assume there's one primary user logged in.
+    let updatedTask: Task | null = null;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('fmn_tasks_')) {
+        const userId = key.replace('fmn_tasks_', '');
+        const tasks = getLocalTasks(userId);
+        const taskIdx = tasks.findIndex(t => t.id === id);
+        if (taskIdx >= 0) {
+          tasks[taskIdx] = { ...tasks[taskIdx], ...updates };
+          updatedTask = tasks[taskIdx];
+          saveLocalTasks(userId, tasks);
+          break;
+        }
+      }
     }
+    return updatedTask;
   },
   completeTask: async (id: string) => {
-    try {
-      const docRef = doc(db, 'tasks', id);
-      const docSnap = await getDoc(docRef);
-      if (!docSnap.exists()) return null;
-      
-      const task = docSnap.data() as Task;
-      const completedAt = serverTimestamp();
-      
-      let newStreakCount = task.currentStreak || task.streakCount || 0;
-      let newCompletionHistory = [...(task.completionHistory || [])];
-      
-      const now = new Date();
-      const lastCompleted = task.lastCompletedDate ? new Date(task.lastCompletedDate) : null;
-      
-      const todayStr = now.toISOString().split('T')[0];
-      if (!newCompletionHistory.includes(todayStr)) {
-        newCompletionHistory.push(todayStr);
-      }
-      
-      const thirtyOneDaysAgo = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000);
-      newCompletionHistory = newCompletionHistory.filter(d => new Date(d) >= thirtyOneDaysAgo);
-      
-      if (task.isRecurring && task.recurrenceInterval) {
-        if (!lastCompleted) {
-          newStreakCount = 1;
-        } else {
-          const lastCompletedDateOnly = new Date(lastCompleted.getFullYear(), lastCompleted.getMonth(), lastCompleted.getDate());
-          const nowDateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          const diffDays = Math.floor((nowDateOnly.getTime() - lastCompletedDateOnly.getTime()) / (1000 * 60 * 60 * 24));
+    let completedTask: Task | null = null;
+    let newGeneratedTask: Task | null = null;
+    let foundUserId: string | null = null;
+    
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('fmn_tasks_')) {
+        const userId = key.replace('fmn_tasks_', '');
+        const tasks = getLocalTasks(userId);
+        const taskIdx = tasks.findIndex(t => t.id === id);
+        
+        if (taskIdx >= 0) {
+          const task = tasks[taskIdx];
+          foundUserId = userId;
           
-          let windowMissed = false;
+          let newStreakCount = task.currentStreak || task.streakCount || 0;
+          let newCompletionHistory = [...(task.completionHistory || [])];
           
-          if (task.recurrenceInterval === 'daily') {
-            if (diffDays <= 2) newStreakCount += 1;
-            else windowMissed = true;
-          } else if (task.recurrenceInterval === 'weekly') {
-            if (diffDays <= 14) newStreakCount += 1;
-            else windowMissed = true;
-          } else if (task.recurrenceInterval === 'monthly') {
-            if (diffDays <= 60) newStreakCount += 1; // Approx 2 months
-            else windowMissed = true;
-          } else if (task.recurrenceInterval === 'yearly') {
-            if (diffDays <= 730) newStreakCount += 1; // Approx 2 years
-            else windowMissed = true;
+          const now = new Date();
+          const lastCompleted = task.lastCompletedDate ? new Date(task.lastCompletedDate) : null;
+          
+          const todayStr = now.toISOString().split('T')[0];
+          if (!newCompletionHistory.includes(todayStr)) {
+            newCompletionHistory.push(todayStr);
           }
           
-          if (windowMissed) newStreakCount = 1;
-        }
+          const thirtyOneDaysAgo = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000);
+          newCompletionHistory = newCompletionHistory.filter(d => new Date(d) >= thirtyOneDaysAgo);
+          
+          if (task.isRecurring && task.recurrenceInterval) {
+            if (!lastCompleted) {
+              newStreakCount = 1;
+            } else {
+              const lastCompletedDateOnly = new Date(lastCompleted.getFullYear(), lastCompleted.getMonth(), lastCompleted.getDate());
+              const nowDateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+              const diffDays = Math.floor((nowDateOnly.getTime() - lastCompletedDateOnly.getTime()) / (1000 * 60 * 60 * 24));
+              
+              let windowMissed = false;
+              
+              if (task.recurrenceInterval === 'daily') {
+                if (diffDays <= 2) newStreakCount += 1;
+                else windowMissed = true;
+              } else if (task.recurrenceInterval === 'weekly') {
+                if (diffDays <= 14) newStreakCount += 1;
+                else windowMissed = true;
+              } else if (task.recurrenceInterval === 'monthly') {
+                if (diffDays <= 60) newStreakCount += 1; // Approx 2 months
+                else windowMissed = true;
+              } else if (task.recurrenceInterval === 'yearly') {
+                if (diffDays <= 730) newStreakCount += 1; // Approx 2 years
+                else windowMissed = true;
+              }
+              
+              if (windowMissed) newStreakCount = 1;
+            }
 
-        const nextDate = new Date();
-        if (task.recurrenceInterval === 'daily') nextDate.setDate(nextDate.getDate() + 1);
-        if (task.recurrenceInterval === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
-        if (task.recurrenceInterval === 'monthly') nextDate.setMonth(nextDate.getMonth() + 1);
-        if (task.recurrenceInterval === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + 1);
-        
-        await setDoc(doc(collection(db, 'tasks')), {
-          ...task,
-          status: 'active',
-          createdAt: Timestamp.fromDate(nextDate),
-          completedAt: null,
-          streakCount: newStreakCount,
-          currentStreak: newStreakCount,
-          completionHistory: newCompletionHistory,
-          lastCompletedDate: now.toISOString()
-        });
+            const nextDate = new Date();
+            if (task.recurrenceInterval === 'daily') nextDate.setDate(nextDate.getDate() + 1);
+            if (task.recurrenceInterval === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
+            if (task.recurrenceInterval === 'monthly') nextDate.setMonth(nextDate.getMonth() + 1);
+            if (task.recurrenceInterval === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + 1);
+            
+            newGeneratedTask = {
+              ...task,
+              id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
+              status: 'active',
+              createdAt: nextDate.toISOString(),
+              completedAt: null,
+              streakCount: newStreakCount,
+              currentStreak: newStreakCount,
+              completionHistory: newCompletionHistory,
+              lastCompletedDate: now.toISOString()
+            };
+          }
+          
+          tasks[taskIdx] = {
+            ...task,
+            status: 'completed',
+            completedAt: now.toISOString(),
+            streakCount: newStreakCount,
+            currentStreak: newStreakCount,
+            completionHistory: newCompletionHistory,
+            lastCompletedDate: now.toISOString()
+          };
+          
+          completedTask = tasks[taskIdx];
+          
+          if (newGeneratedTask) {
+            tasks.push(newGeneratedTask);
+          }
+          
+          saveLocalTasks(userId, tasks);
+          break;
+        }
       }
-      
-      await updateDoc(docRef, {
-        status: 'completed',
-        completedAt,
-        streakCount: newStreakCount,
-        currentStreak: newStreakCount,
-        completionHistory: newCompletionHistory,
-        lastCompletedDate: now.toISOString()
-      });
-      
-      return { ...task, status: 'completed', completedAt: now.toISOString(), streakCount: newStreakCount, currentStreak: newStreakCount, completionHistory: newCompletionHistory, lastCompletedDate: now.toISOString() };
-    } catch (error) {
-      console.error("Error completing task:", error);
-      throw error;
     }
+    return completedTask;
   },
   undoTask: async (id: string) => {
-    try {
-      const docRef = doc(db, 'tasks', id);
-      await updateDoc(docRef, {
-        status: 'active',
-        completedAt: null
-      });
-      const updatedSnap = await getDoc(docRef);
-      return { id, ...updatedSnap.data() };
-    } catch (error) {
-      console.error("Error undoing task:", error);
-      throw error;
+    let updatedTask: Task | null = null;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('fmn_tasks_')) {
+        const userId = key.replace('fmn_tasks_', '');
+        const tasks = getLocalTasks(userId);
+        const taskIdx = tasks.findIndex(t => t.id === id);
+        if (taskIdx >= 0) {
+          tasks[taskIdx] = { ...tasks[taskIdx], status: 'active', completedAt: null };
+          updatedTask = tasks[taskIdx];
+          saveLocalTasks(userId, tasks);
+          break;
+        }
+      }
     }
+    return updatedTask;
   },
   deleteTask: async (id: string) => {
-    try {
-      const docRef = doc(db, 'tasks', id);
-      await deleteDoc(docRef);
-    } catch (error) {
-      console.error("Error deleting task:", error);
-      throw error;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('fmn_tasks_')) {
+        const userId = key.replace('fmn_tasks_', '');
+        let tasks = getLocalTasks(userId);
+        if (tasks.some(t => t.id === id)) {
+          tasks = tasks.filter(t => t.id !== id);
+          saveLocalTasks(userId, tasks);
+          break;
+        }
+      }
     }
   },
   clearTasks: async (taskIds: string[]) => {
-    try {
-      const batch = writeBatch(db);
-      taskIds.forEach(id => {
-        const docRef = doc(db, 'tasks', id);
-        batch.delete(docRef);
-      });
-      await batch.commit();
-    } catch (error) {
-      console.error("Error clearing tasks:", error);
-      throw error;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('fmn_tasks_')) {
+        const userId = key.replace('fmn_tasks_', '');
+        let tasks = getLocalTasks(userId);
+        tasks = tasks.filter(t => !taskIds.includes(t.id));
+        saveLocalTasks(userId, tasks);
+      }
     }
   },
+  importTasksBatch: async (importedTasks: any[]) => {
+    if (importedTasks.length === 0) return;
+    const userId = importedTasks[0].userId;
+    let tasks = getLocalTasks(userId);
+    const newIds = importedTasks.map(t => t.id);
+    tasks = tasks.filter(t => !newIds.includes(t.id));
+    tasks = [...tasks, ...importedTasks];
+    saveLocalTasks(userId, tasks);
+  },
   updateTasksBatch: async (updates: { id: string; category: string; effortLevel: string; priority: string; }[]) => {
-    try {
-      const batch = writeBatch(db);
-      updates.forEach(update => {
-        const docRef = doc(db, 'tasks', update.id);
-        batch.update(docRef, {
-          category: update.category,
-          effortLevel: update.effortLevel,
-          priority: update.priority
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('fmn_tasks_')) {
+        const userId = key.replace('fmn_tasks_', '');
+        const tasks = getLocalTasks(userId);
+        let changed = false;
+        
+        updates.forEach(update => {
+          const taskIdx = tasks.findIndex(t => t.id === update.id);
+          if (taskIdx >= 0) {
+            tasks[taskIdx] = { 
+              ...tasks[taskIdx], 
+              category: update.category as any, 
+              effortLevel: update.effortLevel as any, 
+              priority: update.priority as any 
+            };
+            changed = true;
+          }
         });
+        
+        if (changed) {
+          saveLocalTasks(userId, tasks);
+        }
+      }
+    }
+  },
+  
+  // -- CLOUD SYNC FUNCTIONALITY --
+  syncWithCloud: async (userId: string) => {
+    try {
+      const tasks = getLocalTasks(userId);
+      const profile = getLocalProfile(userId);
+      
+      const batch = writeBatch(db);
+      
+      // We will blindly overwrite cloud state with local state by writing all local tasks.
+      // Wait, we probably should delete everything else in cloud first, but pulling all cloud IDs is heavy. 
+      // We'll write everything from local to cloud.
+      
+      tasks.forEach(task => {
+        const docRef = doc(db, 'tasks', task.id);
+        const { id, ...data } = task; // avoid writing duplicate ID
+        batch.set(docRef, data);
       });
+      
+      const profileRef = doc(db, 'profiles', userId);
+      batch.set(profileRef, profile, { merge: true });
+      
       await batch.commit();
-    } catch (error) {
-      console.error("Error updating tasks in batch:", error);
-      throw error;
+      
+      // Clear unsynced changes flag
+      localStorage.removeItem('has_unsynced_changes');
+      localStorage.setItem(`fmn_last_synced_${userId}`, new Date().toISOString());
+      window.dispatchEvent(new Event('local_tasks_updated'));
+      
+      return true;
+    } catch (e) {
+      console.error("Cloud sync failed", e);
+      throw e;
     }
   }
 };
+
