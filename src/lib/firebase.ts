@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup as firebaseSignInWithPopup, onAuthStateChanged as firebaseOnAuthStateChanged } from 'firebase/auth';
+import { getAuth, initializeAuth, indexedDBLocalPersistence, browserPopupRedirectResolver, GoogleAuthProvider, signInWithPopup as firebaseSignInWithPopup, onAuthStateChanged as firebaseOnAuthStateChanged } from 'firebase/auth';
 import { initializeFirestore, persistentLocalCache, serverTimestamp as firestoreServerTimestamp } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -16,13 +16,14 @@ if (!firebaseConfig.apiKey) {
 }
 
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+export const auth = initializeAuth(app, {
+  persistence: indexedDBLocalPersistence,
+  popupRedirectResolver: browserPopupRedirectResolver
+});
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache(),
   ignoreUndefinedProperties: true,
 });
-
-// Removed enableIndexedDbPersistence call as it's now handled in initializeFirestore
 
 export const googleProvider = new GoogleAuthProvider();
 

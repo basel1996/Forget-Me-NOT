@@ -61,6 +61,7 @@ interface Suggestion {
 }
 
 const Login = () => {
+  const { offlineLogin } = useAuth();
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', 'household');
   }, []);
@@ -70,6 +71,9 @@ const Login = () => {
       if (Capacitor.isNativePlatform()) {
         // 1. Trigger the native Android Google login prompt
         const googleUser = await GoogleAuth.signIn();
+        
+        // Save the Google user locally in case Firebase fails due to being offline
+        offlineLogin(googleUser);
 
         // 2. Take the secure token Android gives us and hand it to Firebase
         const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
@@ -95,10 +99,16 @@ const Login = () => {
       >
         <h1 className="text-4xl font-light tracking-tight mb-8">Forget-Me-Not</h1>
         <p className="text-muted mb-8 font-light">Your proactive digital assistant.</p>
-        <button onClick={handleLogin} className="btn-primary">
-          <LogIn size={18} />
-          Continue with Google
-        </button>
+        <div className="flex flex-col gap-4">
+          <button onClick={handleLogin} className="btn-primary">
+            <LogIn size={18} />
+            Continue with Google
+          </button>
+          <button onClick={() => offlineLogin({uid: 'offline-user', email: 'guest@offline', displayName: 'Guest (Offline)', photoURL: ''})} className="btn-secondary py-3 px-4 flex items-center justify-center gap-2 rounded-xl bg-surface hover:bg-surface-active transition-colors text-muted hover:text-default">
+            <Cloud size={18} className="opacity-70" />
+            Continue Offline
+          </button>
+        </div>
       </motion.div>
     </div>
   );
@@ -418,7 +428,7 @@ const CircularProgressIcon = ({
 };
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, offlineLogout } = useAuth();
   const phase = useCircadian();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [completedTasksCount, setCompletedTasksCount] = useState({ life: 0, household: 0, routines: 0 });
@@ -1674,9 +1684,11 @@ const handlePullSubmit = async (e: React.KeyboardEvent<HTMLInputElement>) => {
               if (confirmLogout) {
                 if (Capacitor.isNativePlatform()) {
                   GoogleAuth.signOut().catch(console.error).finally(() => {
+                    offlineLogout();
                     auth.signOut();
                   });
                 } else {
+                  offlineLogout();
                   auth.signOut();
                 }
               } else {
