@@ -3,7 +3,6 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { dbService } from "./server/db.js";
 
 dotenv.config();
 
@@ -26,19 +25,6 @@ const ai = new GoogleGenAI({
 app.post("/api/auth/login", (req, res) => {
   // Simple mock login that always succeeds for the preview
   res.json({ id: "user-123", email: "user@example.com", name: "User" });
-});
-
-// DB API Routes
-app.get("/api/profile", async (req, res) => {
-  const userId = req.headers['x-user-id'] as string || "user-123";
-  res.json(await dbService.getProfile(userId));
-});
-
-app.post("/api/profile", async (req, res) => {
-  const userId = req.headers['x-user-id'] as string || "user-123";
-  const { bio } = req.body;
-  await dbService.saveProfile(userId, bio);
-  res.json({ success: true });
 });
 
 app.post("/api/profile/parse", async (req, res) => {
@@ -74,149 +60,11 @@ app.post("/api/profile/parse", async (req, res) => {
     const parsedObj = JSON.parse(output);
     const bioString = JSON.stringify(parsedObj);
 
-    // Save to Firestore
-    await dbService.saveProfile(userId, bioString);
-
     res.json({ success: true, bio: bioString });
   } catch (error) {
     console.error("Error parsing profile:", error);
     res.status(500).json({ error: "Failed to parse profile JSON. Please try again." });
   }
-});
-
-app.get("/api/tasks", async (req, res) => {
-  const userId = req.headers['x-user-id'] as string || "user-123";
-  const { status, limit } = req.query;
-  const tasks = await dbService.getTasks(
-    userId, 
-    status as 'active' | 'completed' | undefined,
-    limit ? parseInt(limit as string, 10) : undefined
-  );
-  res.json(tasks);
-});
-
-app.post("/api/tasks", async (req, res) => {
-  const userId = req.headers['x-user-id'] as string || "user-123";
-  const { title, description, category, tag, isRecurring, recurrenceInterval } = req.body;
-  const task = await dbService.addTask(userId, title, description, category || 'life', tag, isRecurring, recurrenceInterval);
-  res.json(task);
-});
-
-app.post("/api/tasks/:id/complete", async (req, res) => {
-  const { id } = req.params;
-  const task = await dbService.completeTask(id);
-  res.json(task);
-});
-
-app.post("/api/tasks/:id/undo", async (req, res) => {
-  const { id } = req.params;
-  const task = await dbService.undoTask(id);
-  res.json(task);
-});
-
-app.patch("/api/tasks/:id", async (req, res) => {
-  const { id } = req.params;
-  const updates = req.body;
-  const task = await dbService.updateTask(id, updates);
-  res.json(task);
-});
-
-app.delete("/api/tasks/:id", async (req, res) => {
-  const { id } = req.params;
-  await dbService.deleteTask(id);
-  res.json({ success: true });
-});
-
-app.get("/api/analytics", async (req, res) => {
-  const userId = req.headers['x-user-id'] as string || "user-123";
-  const allTasks = await dbService.getTasks(userId, 'completed');
-  
-  const now = new Date();
-  const msPerDay = 1000 * 60 * 60 * 24;
-  
-  let days7 = 0;
-  let days30 = 0;
-  let days90 = 0;
-  
-  const completedByDate: Record<string, number> = {};
-  const categoryCounts: Record<string, number> = { life: 0, household: 0 };
-  const dayOfWeekCounts: Record<string, number> = {};
-  
-  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  
-  allTasks.forEach(t => {
-    const d = new Date(t.completedAt || t.createdAt);
-    const diffDays = (now.getTime() - d.getTime()) / msPerDay;
-    
-    if (diffDays <= 7) days7++;
-    if (diffDays <= 30) days30++;
-    if (diffDays <= 90) days90++;
-    
-    const dateStr = d.toDateString();
-    completedByDate[dateStr] = (completedByDate[dateStr] || 0) + 1;
-    
-    if (t.category) {
-      categoryCounts[t.category] = (categoryCounts[t.category] || 0) + 1;
-    }
-    
-    const dayName = dayNames[d.getDay()];
-    dayOfWeekCounts[dayName] = (dayOfWeekCounts[dayName] || 0) + 1;
-  });
-  
-  // Calculate Streak
-  let currentStreak = 0;
-  let checkDate = new Date();
-  while (true) {
-    const dateStr = checkDate.toDateString();
-    if (completedByDate[dateStr]) {
-      currentStreak++;
-      checkDate.setDate(checkDate.getDate() - 1);
-    } else {
-      // If today has 0, check yesterday. If yesterday has 0, streak is 0.
-      if (currentStreak === 0 && checkDate.toDateString() === now.toDateString()) {
-        checkDate.setDate(checkDate.getDate() - 1);
-        if (!completedByDate[checkDate.toDateString()]) {
-          break;
-        }
-      } else {
-        break;
-      }
-    }
-  }
-  
-  // Most productive day
-  let mostProductiveDay = 'N/A';
-  let maxCount = -1;
-  for (const [day, count] of Object.entries(dayOfWeekCounts)) {
-    if (count > maxCount) {
-      maxCount = count;
-      mostProductiveDay = day;
-    }
-  }
-
-  // Last 7 days chart data
-  const chartData = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toDateString();
-    chartData.push({
-      date: dateStr,
-      shortDate: d.toLocaleDateString(undefined, { weekday: 'short' }),
-      count: completedByDate[dateStr] || 0
-    });
-  }
-
-  res.json({
-    days7,
-    days30,
-    days90,
-    currentStreak,
-    mostProductiveDay,
-    categoryCounts,
-    chartData,
-    recentTasks: allTasks.filter(t => (now.getTime() - new Date(t.completedAt || t.createdAt).getTime()) / msPerDay <= 7).slice(0, 15) // send max 15 recent to reflection
-  });
 });
 
 app.post("/api/reflect", async (req, res) => {

@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { ArrowLeft, RotateCcw, Archive, Sparkles, TrendingUp, Activity, CheckCircle2, ArrowUp, ArrowDown, Trash2, X, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-
-import { storageService } from "./lib/storageService";
+import { dbService } from "./lib/dbService";
 
 interface Task {
   id: string;
-  
+  userId: string;
   title: string;
   description: string;
-  status: 'active' | 'completed';
+  status: 'active' | 'completed' | 'dismissed';
   category: 'life' | 'household';
   createdAt: string;
   completedAt?: string;
@@ -76,7 +75,7 @@ function groupTasksByDate(tasks: Task[]) {
 }
 
 export function HistoryView({ goBack, doUndo, bio }: { goBack: () => void, doUndo: (id: string) => Promise<void>, bio: string }) {
-  
+  const user = { uid: "local-user" };
   const [historyTasks, setHistoryTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -91,14 +90,14 @@ export function HistoryView({ goBack, doUndo, bio }: { goBack: () => void, doUnd
   const [totalCount, setTotalCount] = useState(0);
 
   const fetchHistory = async (offset = 0) => {
-    
+    if (!user) return;
     if (offset === 0) setLoading(true);
     else setLoadingMore(true);
 
     try {
       // Note: For simplicity and offline support, we fetch all completed tasks and slice locally.
-      // Offset pagination relies on backend, but we've migrated to client storageService for offline support.
-      const data = await storageService.getTasks('completed');
+      // Offset pagination relies on backend, but we've migrated to client dbService for offline support.
+      const data = await dbService.getTasks(user.uid, 'completed');
       setTotalCount(data.length);
       const slicedData = data.slice(offset, offset + limit);
       if (offset === 0) {
@@ -117,7 +116,7 @@ export function HistoryView({ goBack, doUndo, bio }: { goBack: () => void, doUnd
   };
 
   const fetchAnalyticsAndReflect = async () => {
-    
+    if (!user) return;
     if (!navigator.onLine) {
        // Graceful fallback for offline reflection
        setReflection("Offline mode. Your reflection will be generated when you reconnect!");
@@ -129,7 +128,7 @@ export function HistoryView({ goBack, doUndo, bio }: { goBack: () => void, doUnd
     setLoadingReflection(true);
     try {
       const analRes = await fetch('/api/analytics', {
-        headers: { 'x-user-id': "" }
+        headers: { 'x-user-id': user.uid }
       });
       if (!analRes.ok) throw new Error("Failed to fetch analytics");
       const analData = await analRes.json();
@@ -139,7 +138,7 @@ export function HistoryView({ goBack, doUndo, bio }: { goBack: () => void, doUnd
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'x-user-id': ""
+          'x-user-id': user.uid
         },
         body: JSON.stringify({ bio, recentTasks: analData.recentTasks })
       });
@@ -171,7 +170,7 @@ export function HistoryView({ goBack, doUndo, bio }: { goBack: () => void, doUnd
 
   const handleDelete = async (id: string) => {
     try {
-      await storageService.deleteTask(id);
+      await dbService.deleteTask(id);
       setHistoryTasks(prev => prev.filter(t => t.id !== id));
       setTotalCount(prev => Math.max(0, prev - 1));
     } catch (e) {
@@ -180,12 +179,12 @@ export function HistoryView({ goBack, doUndo, bio }: { goBack: () => void, doUnd
   };
 
   const handleClearAll = async () => {
-    
+    if (!user) return;
     
     try {
-      const allCompleted = await storageService.getTasks('completed');
+      const allCompleted = await dbService.getTasks(user.uid, 'completed');
       const taskIds = allCompleted.map(t => t.id);
-      await storageService.clearTasks(taskIds);
+      await dbService.clearTasks(taskIds);
       setHistoryTasks([]);
       setTotalCount(0);
       setClearAllConfirm(false);
